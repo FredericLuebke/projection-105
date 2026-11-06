@@ -58,9 +58,93 @@ function retirementEnd(birth,age){const whole=Math.floor(age),months=Math.round(
 function bonusFor(rows,age){const hits=rows.filter(b=>age>=b.from&&age<=b.to);if(hits.length!==1)throw Error(`Il faut exactement une bonification pour l’âge LPP ${age}.`);return hits[0].rate;}
 function getPlans(){return [...document.querySelectorAll('.plan')].map((el,i)=>{const rows=[...el.querySelectorAll('.bonus-table tbody tr')].map(tr=>({from:Number(tr.querySelector('.from').value),to:Number(tr.querySelector('.to').value),rate:Number(tr.querySelector('.bonus').value.replace(/,/g,''))}));rows.sort((a,b)=>a.from-b.from);rows.forEach((b,j)=>{if(b.to<b.from||b.rate<0)throw Error(`Plan ${i+1}: vérifie une tranche.`);if(j&&b.from<=rows[j-1].to)throw Error(`Plan ${i+1}: les tranches se chevauchent.`);});return{name:`Plan ${i+1}`,balance:num(el.querySelector('.without')),salary:num(el.querySelector('.salary')),interest:num(el.querySelector('.interest')),brackets:rows};});}
 function validateBrackets(plan,firstAge,lastAge){if(plan.brackets.length===0)throw Error(`${plan.name}: ajoute au moins une tranche de bonification.`);for(let age=firstAge;age<=lastAge;age++){const matching=plan.brackets.filter(b=>age>=b.from&&age<=b.to);if(matching.length!==1)throw Error(`${plan.name}: une seule tranche doit couvrir l’âge LPP ${age}.`);}}
-function calc(){const birth=parseDate('birthDate'),calcDate=parseDate('calculationDate'),retAge=num(document.getElementById('retirementAge'));const plans=getPlans();if(!plans.length)throw Error('Ajoute un plan.');if(calcDate.getDate()!==1)throw Error('La date de calcul doit être le premier jour du mois.');const end=retirementEnd(birth,retAge);if(end<=calcDate)throw Error('La date de retraite doit être postérieure à la date de calcul.');const ageMonths=(end.getFullYear()-birth.getFullYear())*12+end.getMonth()-birth.getMonth(),low=Math.floor(ageMonths/12),rem=ageMonths%12,lower=rates.get(low);if(lower===undefined)throw Error(`Saisis le taux à ${low} ans.`);let conversion=lower;if(rem){const upper=rates.get(low+1);if(upper===undefined)throw Error(`Saisis le taux à ${low+1} ans.`);conversion=lower*(12-rem)/12+upper*rem/12;}
- const results=[];for(const p of plans){if(p.balance<0||p.salary<0||p.interest<0)throw Error(`${p.name}: montants et taux doivent être positifs.`);const firstAge=calcDate.getFullYear()-birth.getFullYear(),lastAge=end.getFullYear()-birth.getFullYear();validateBrackets(p,firstAge,lastAge);let bal=p.balance;let age=firstAge;let initialBonus=p.salary*bonusFor(p.brackets,age)/100;let fraction=calcDate.getMonth()/12;let base=(bal-initialBonus*fraction)/(1+p.interest/100*fraction);if(base<0)throw Error(`${p.name}: reconstitution du 1er janvier impossible.`);for(let cursor=new Date(calcDate);cursor<=end;){if(cursor.getMonth()===0&&cursor.getDate()===1&&cursor.getTime()!==calcDate.getTime())base=bal;const last=new Date(cursor.getFullYear(),cursor.getMonth()+1,0);age=last.getFullYear()-birth.getFullYear();const bonus=p.salary*bonusFor(p.brackets,age)/100;bal+=base*p.interest/100/12+bonus/12;cursor=new Date(last.getFullYear(),last.getMonth()+1,1);}results.push({name:p.name,balance:bal,pension:bal*conversion/100});}return{end,conversion,results};}
-document.getElementById('calculate').addEventListener('click',()=>{const error=document.getElementById('error');try{error.style.display='none';const output=calc();document.getElementById('empty').classList.add('hidden');const host=document.getElementById('results');host.classList.remove('hidden');const total=output.results.reduce((s,p)=>s+p.pension,0);host.innerHTML=`<section class="result-summary"><small>RENTE ANNUELLE CUMULÉE ESTIMÉE</small><div class="sum">CHF ${fmt(total)}</div><footer><span>Date de retraite estimée</span><strong>${output.end.toLocaleDateString('fr-CH')}</strong></footer></section><section class="panel">${output.results.map(p=>`<div class="result-plan"><b>${p.name}</b><div class="metric"><span>Avoir projeté sans rachat</span><b>CHF ${fmt(p.balance)}</b></div><div class="metric"><span>Taux de conversion interpolé</span><b>${fmt(output.conversion,4)}%</b></div><div class="metric"><span>Rente annuelle estimée</span><b>CHF ${fmt(p.pension)}</b></div></div>`).join('')}</section>`;}catch(e){error.textContent=e.message||String(e);error.style.display='block';}});
+function ageInMonths(birth,date){return (date.getFullYear()-birth.getFullYear())*12+date.getMonth()-birth.getMonth();}
+function conversionAt(birth,date){
+ const months=ageInMonths(birth,date),low=Math.floor(months/12),rem=months%12;
+ const lower=rates.get(low),upper=rem?rates.get(low+1):lower;
+ if(!Number.isFinite(lower)||!Number.isFinite(upper))throw Error(`Taux de conversion manquant pour l’âge de ${low} ans.`);
+ return lower*(12-rem)/12+upper*rem/12;
+}
+// Même projection mensuelle pour les deux scénarios ; intérêts sur la base du 1er janvier.
+function projectMonthly(plan,initial,birth,start,end){
+ let balance=initial;
+ const fraction=start.getMonth()/12;
+ const initialBonus=plan.salary*bonusFor(plan.brackets,start.getFullYear()-birth.getFullYear())/100;
+ let base=(balance-initialBonus*fraction)/(1+plan.interest/100*fraction);
+ if(base<0)throw Error(`${plan.name}: reconstitution du 1er janvier impossible.`);
+ const months=[];
+ for(let cursor=new Date(start);cursor<=end;cursor=new Date(cursor.getFullYear(),cursor.getMonth()+1,1)){
+  if(cursor.getMonth()===0&&cursor.getTime()!==start.getTime())base=balance;
+  const date=new Date(cursor.getFullYear(),cursor.getMonth()+1,0);
+  const bonus=plan.salary*bonusFor(plan.brackets,date.getFullYear()-birth.getFullYear())/100;
+  balance+=base*plan.interest/100/12+bonus/12;
+  if(!Number.isFinite(balance))throw Error(`${plan.name}: projection hors limites.`);
+  months.push({date,balance});
+ }
+ return months;
+}
+function findThreshold(months,limit){
+ let lastSafe=null;
+ for(const month of months){
+  if(month.pension>limit)return {lastSafe,firstExceeded:month};
+  lastSafe=month;
+ }
+ return {lastSafe,firstExceeded:null};
+}
+function calc(){
+ const birth=parseDate('birthDate'),calcDate=parseDate('calculationDate');
+ const retAge=numericValue(document.getElementById('retirementAge').value);
+ if(!Number.isFinite(retAge)||retAge<58||retAge>70)throw Error('L’âge de retraite doit être compris entre 58 et 70 ans.');
+ if(calcDate.getDate()!==1)throw Error('La date de calcul doit être le premier jour du mois.');
+ if(calcDate<=birth)throw Error('La date de calcul doit être postérieure à la naissance.');
+ const end=retirementEnd(birth,retAge);
+ if(end<=calcDate)throw Error('La date de retraite doit être postérieure à la date de calcul.');
+ const plans=getPlans();
+ if(!plans.length)throw Error('Ajoute un plan.');
+ const elements=[...document.querySelectorAll('.plan')];
+ const conversion=conversionAt(birth,end);
+ const results=plans.map((plan,index)=>{
+  for(const [selector,key] of [['.without','balance'],['.with','withBalance'],['.salary','salary'],['.interest','interest']]){
+   const input=elements[index].querySelector(selector);
+   const value=numericValue(input.value);
+   if(!input.value.trim()||!Number.isFinite(value)||value<0)throw Error(`${plan.name}: saisis des montants et taux valides, positifs ou nuls.`);
+   plan[key]=value;
+  }
+  if(plan.brackets.some(b=>!Number.isInteger(b.from)||!Number.isInteger(b.to)||!Number.isFinite(b.rate)))throw Error(`${plan.name}: vérifie les tranches de bonification.`);
+  validateBrackets(plan,calcDate.getFullYear()-birth.getFullYear(),end.getFullYear()-birth.getFullYear());
+  const without=projectMonthly(plan,plan.balance,birth,calcDate,end);
+  const withPurchase=projectMonthly(plan,plan.withBalance,birth,calcDate,end);
+  const balance=without[without.length-1].balance;
+  return {name:plan.name,balance,pension:balance*conversion/100,withPurchase};
+ });
+ const reference=results.reduce((sum,p)=>sum+p.pension,0),limit=reference*1.05;
+ const monthly=results[0].withPurchase.filter(m=>ageInMonths(birth,m.date)>=58*12).map(m=>{
+  const index=(m.date.getFullYear()-calcDate.getFullYear())*12+m.date.getMonth()-calcDate.getMonth();
+  const rate=conversionAt(birth,m.date);
+  const pension=results.reduce((sum,p)=>sum+p.withPurchase[index].balance*rate/100,0);
+  return {date:m.date,pension};
+ });
+ return {end,conversion,results,reference,limit,searchStart:monthly[0]?.date,...findThreshold(monthly,limit)};
+}
+const dateFmt=date=>`${String(date.getDate()).padStart(2,'0')}.${String(date.getMonth()+1).padStart(2,'0')}.${date.getFullYear()}`;
+document.getElementById('calculate').addEventListener('click',()=>{
+ const error=document.getElementById('error'),host=document.getElementById('results');
+ try{
+  error.style.display='none';
+  const output=calc();
+  const status=output.firstExceeded
+   ? output.lastSafe?`Dernière fin de mois sans dépassement : <strong>${dateFmt(output.lastSafe.date)}</strong>`:'La limite est déjà dépassée au premier mois évalué : aucune date admissible dans la période.'
+   :'Aucun dépassement jusqu’à la retraite réglementaire.';
+  host.innerHTML=`<section class="result-summary"><small>RENTE ANNUELLE SANS RACHAT À LA RETRAITE RÉGLEMENTAIRE · TOUS PLANS</small><div class="sum">CHF ${fmt(output.reference)}</div><footer><span>Retraite réglementaire</span><strong>${dateFmt(output.end)}</strong></footer></section>
+   <section class="result-summary"><small>MONTANT LIMITE ANNUEL · 105 %</small><div class="sum">CHF ${fmt(output.limit)}</div></section>
+   <section class="panel"><h3>Comparaison avec rachat · tous plans</h3><p>${status}</p>
+   ${output.firstExceeded?`<div class="metric"><span>Premier dépassement</span><b>${dateFmt(output.firstExceeded.date)}</b></div><div class="metric"><span>Rente annuelle au dépassement</span><b>CHF ${fmt(output.firstExceeded.pension)}</b></div>`:''}
+   ${output.lastSafe?`<div class="metric"><span>Dernière fin de mois admissible</span><b>${dateFmt(output.lastSafe.date)}</b></div><div class="metric"><span>Rente annuelle avec rachat à cette date</span><b>CHF ${fmt(output.lastSafe.pension)}</b></div>`:''}
+   <p class="legal">Comparaison mensuelle du ${dateFmt(output.searchStart)} au ${dateFmt(output.end)}, au taux de conversion de l’âge atteint. Pas de comparaison avant 58 ans. Une égalité à la limite est autorisée.</p></section>
+   <section class="panel">${output.results.map(p=>`<div class="result-plan"><b>${p.name} · à la retraite réglementaire</b><div class="metric"><span>Avoir projeté sans rachat</span><b>CHF ${fmt(p.balance)}</b></div><div class="metric"><span>Rente annuelle sans rachat</span><b>CHF ${fmt(p.pension)}</b></div><div class="metric"><span>Avoir projeté avec rachat</span><b>CHF ${fmt(p.withPurchase[p.withPurchase.length-1].balance)}</b></div></div>`).join('')}</section>`;
+  document.getElementById('empty').classList.add('hidden');host.classList.remove('hidden');
+ }catch(e){host.classList.add('hidden');document.getElementById('empty').classList.remove('hidden');error.textContent=e.message||String(e);error.style.display='block';}
+});
 </script>
 </body>
 </html>
