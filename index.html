@@ -147,6 +147,49 @@ document.getElementById('calculate').addEventListener('click',()=>{
  }catch(e){host.classList.add('hidden');document.getElementById('empty').classList.remove('hidden');error.textContent=e.message||String(e);error.style.display='block';}
 });
 </script>
+<script>
+const helpItems={
+ with:{title:'Avoir avec rachat à la date de calcul (CHF)',text:'Elément standard de photo « PLP selon article 15 LFLP »'},
+ without:{title:'Avoir sans rachat à la date de calcul (CHF)',text:'Elément spécifique 6 de photo « Rachat max. - Avoir de vieillesse sans les rachats futurs »'},
+ salary:{title:'Salaire retraite (CHF)',text:'Elément standard de photo « Salaire prestations retraite »'},
+ interest:{title:'Taux d’intérêt annuel (%)',text:'Art 3.8 de l’annexe technique « Taux d\'intérêt pour projection »'},
+ plans:{title:'Données par plan',text:'Données valable à la date de calcul'}
+};
+const helpStyle=document.createElement('style');
+helpStyle.textContent='.help-label{display:flex;align-items:center;gap:7px}.help-label label{min-width:0}.info-button{flex-shrink:0;display:inline-grid;place-items:center;width:20px;height:20px;padding:0;border:1px solid #6cabc8;border-radius:50%;background:#19314a;color:#b9e8ff;font:bold 12px Georgia,serif;cursor:pointer;vertical-align:middle}.info-button:hover{background:#28516e}.info-button:focus-visible{outline:2px solid #7dd3fc;outline-offset:3px}.info-dialog{width:min(440px,90vw);box-sizing:border-box;padding:24px;border:1px solid #3c617c;border-radius:14px;background:#111d2e;color:#e8eef8}.info-dialog::backdrop{background:#0009}.info-dialog h2{margin:0 0 16px;font-size:18px}.info-dialog p{line-height:1.6;overflow-wrap:anywhere}.info-dialog button{padding:9px 16px;border:1px solid #76c9ee;border-radius:8px;background:#8bd5f7;color:#071523;cursor:pointer}.section-title h2 .info-button{margin-left:7px}';
+document.head.append(helpStyle);
+const helpDialog=document.createElement('dialog');
+helpDialog.className='info-dialog';helpDialog.setAttribute('aria-labelledby','infoTitle');helpDialog.setAttribute('aria-describedby','infoMessage');
+helpDialog.innerHTML='<h2 id="infoTitle"></h2><p id="infoMessage"></p><form method="dialog"><button>Fermer</button></form>';
+document.body.append(helpDialog);
+let helpTrigger=null;
+function makeInfoButton(key){
+ const button=document.createElement('button');button.type='button';button.className='info-button';button.textContent='i';
+ button.setAttribute('aria-label',`Information : ${helpItems[key].title}`);button.setAttribute('aria-haspopup','dialog');
+ button.addEventListener('click',()=>{
+  helpTrigger=button;helpDialog.querySelector('h2').textContent=helpItems[key].title;
+  helpDialog.querySelector('p').textContent=helpItems[key].text;helpDialog.showModal();
+ });return button;
+}
+helpDialog.addEventListener('close',()=>{if(helpTrigger?.isConnected)helpTrigger.focus();});
+function addPlanHelp(){
+ document.querySelectorAll('.plan').forEach(plan=>{
+  for(const key of ['with','without','salary','interest']){
+   const input=plan.querySelector(`.${key}`),oldLabel=input.closest('label.field');
+   if(!oldLabel)continue;
+   const wrapper=document.createElement('div');wrapper.className='field';
+   const header=document.createElement('div');header.className='help-label';
+   const label=document.createElement('label');label.textContent=helpItems[key].title;
+   input.id=`plan-${plan.dataset.plan}-${key}`;label.htmlFor=input.id;
+   header.append(label,makeInfoButton(key));wrapper.append(header,input);oldLabel.replaceWith(wrapper);
+  }
+ });
+}
+const plansHeading=[...document.querySelectorAll('.section-title h2')].find(h=>h.textContent==='Données par plan');
+plansHeading.append(makeInfoButton('plans'));
+addPlanHelp();
+new MutationObserver(addPlanHelp).observe(document.getElementById('plans'),{childList:true});
+</script>
 <script src="jspdf.umd.min.js"></script>
 <script src="jspdf.plugin.autotable.min.js"></script>
 <script src="pdf-export.js"></script>
