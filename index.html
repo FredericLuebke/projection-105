@@ -78,9 +78,10 @@ function projectMonthly(plan,initial,birth,start,end){
   if(cursor.getMonth()===0&&cursor.getTime()!==start.getTime())base=balance;
   const date=new Date(cursor.getFullYear(),cursor.getMonth()+1,0);
   const bonus=plan.salary*bonusFor(plan.brackets,date.getFullYear()-birth.getFullYear())/100;
-  balance+=base*plan.interest/100/12+bonus/12;
+  const interest=base*plan.interest/100/12;
+  balance+=interest+bonus/12;
   if(!Number.isFinite(balance))throw Error(`${plan.name}: projection hors limites.`);
-  months.push({date,balance});
+  months.push({date,balance,interest,bonus:bonus/12,lppAge:date.getFullYear()-birth.getFullYear()});
  }
  return months;
 }
@@ -116,7 +117,7 @@ function calc(){
   const without=projectMonthly(plan,plan.balance,birth,calcDate,end);
   const withPurchase=projectMonthly(plan,plan.withBalance,birth,calcDate,end);
   const balance=without[without.length-1].balance;
-  return {name:plan.name,balance,pension:balance*conversion/100,withPurchase};
+  return {name:plan.name,balance,pension:balance*conversion/100,withPurchase,without,parameters:plan};
  });
  const reference=results.reduce((sum,p)=>sum+p.pension,0),limit=reference*1.05;
  const monthly=results[0].withPurchase.filter(m=>ageInMonths(birth,m.date)>=58*12).map(m=>{
@@ -125,7 +126,7 @@ function calc(){
   const pension=results.reduce((sum,p)=>sum+p.withPurchase[index].balance*rate/100,0);
   return {date:m.date,pension};
  });
- return {end,conversion,results,reference,limit,searchStart:monthly[0]?.date,...findThreshold(monthly,limit)};
+ return {birth,calcDate,retAge,end,conversion,results,reference,limit,searchStart:monthly[0]?.date,...findThreshold(monthly,limit)};
 }
 const dateFmt=date=>`${String(date.getDate()).padStart(2,'0')}.${String(date.getMonth()+1).padStart(2,'0')}.${date.getFullYear()}`;
 document.getElementById('calculate').addEventListener('click',()=>{
@@ -146,5 +147,8 @@ document.getElementById('calculate').addEventListener('click',()=>{
  }catch(e){host.classList.add('hidden');document.getElementById('empty').classList.remove('hidden');error.textContent=e.message||String(e);error.style.display='block';}
 });
 </script>
+<script src="jspdf.umd.min.js"></script>
+<script src="jspdf.plugin.autotable.min.js"></script>
+<script src="pdf-export.js"></script>
 </body>
 </html>
