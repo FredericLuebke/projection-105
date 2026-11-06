@@ -134,13 +134,12 @@ document.getElementById('calculate').addEventListener('click',()=>{
   error.style.display='none';
   const output=calc();
   const status=output.firstExceeded
-   ? output.lastSafe?`Dernière fin de mois sans dépassement : <strong>${dateFmt(output.lastSafe.date)}</strong>`:'La limite est déjà dépassée au premier mois évalué : aucune date admissible dans la période.'
+    ? output.lastSafe?'Dernière échéance mensuelle respectant la limite de 105 %.':'La limite est déjà dépassée au premier mois évalué : aucune date admissible dans la période.'
    :'Aucun dépassement jusqu’à la retraite réglementaire.';
   host.innerHTML=`<section class="result-summary"><small>RENTE ANNUELLE SANS RACHAT À LA RETRAITE RÉGLEMENTAIRE · TOUS PLANS</small><div class="sum">CHF ${fmt(output.reference)}</div><footer><span>Retraite réglementaire</span><strong>${dateFmt(output.end)}</strong></footer></section>
    <section class="result-summary"><small>MONTANT LIMITE ANNUEL · 105 %</small><div class="sum">CHF ${fmt(output.limit)}</div></section>
     <section class="panel projection-105"><h3>Projection du 105%</h3><p>${status}</p>
-    ${output.firstExceeded?`<div class="threshold-date"><span>Date du premier dépassement · tous plans</span><strong>${dateFmt(output.firstExceeded.date)}</strong></div><div class="metric"><span>Rente annuelle au dépassement</span><b>CHF ${fmt(output.firstExceeded.pension)}</b></div>`:''}
-   ${output.lastSafe?`<div class="metric"><span>Dernière fin de mois admissible</span><b>${dateFmt(output.lastSafe.date)}</b></div><div class="metric"><span>Rente annuelle avec rachat à cette date</span><b>CHF ${fmt(output.lastSafe.pension)}</b></div>`:''}
+    ${output.lastSafe?`<div class="threshold-date"><span>Dernière fin de mois sans dépassement</span><strong>${dateFmt(output.lastSafe.date)}</strong></div><div class="metric"><span>Rente annuelle avec rachat à cette date</span><b>CHF ${fmt(output.lastSafe.pension)}</b></div>`:''}
    <p class="legal">Comparaison mensuelle du ${dateFmt(output.searchStart)} au ${dateFmt(output.end)}, au taux de conversion de l’âge atteint. Pas de comparaison avant 58 ans. Une égalité à la limite est autorisée.</p></section>
    <section class="panel">${output.results.map(p=>`<div class="result-plan"><b>${p.name} · à la retraite réglementaire</b><div class="metric"><span>Avoir projeté sans rachat</span><b>CHF ${fmt(p.balance)}</b></div><div class="metric"><span>Rente annuelle sans rachat</span><b>CHF ${fmt(p.pension)}</b></div><div class="metric"><span>Avoir projeté avec rachat</span><b>CHF ${fmt(p.withPurchase[p.withPurchase.length-1].balance)}</b></div></div>`).join('')}</section>`;
   document.getElementById('empty').classList.add('hidden');host.classList.remove('hidden');
