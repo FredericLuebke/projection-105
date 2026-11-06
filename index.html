@@ -35,6 +35,15 @@ for(let age=58;age<=70;age++){
  input.addEventListener('input',()=>{const v=Number(input.value.replace(/,/g,'')); if(Number.isFinite(v)&&v>=0&&v<=100) rates.set(age,v);}); input.addEventListener('blur',()=>{const v=Number(input.value.replace(/,/g,''));if(Number.isFinite(v)&&v>=0&&v<=100){rates.set(age,v);input.value=fmt(v);}});
  rateCell.append(input);tr.append(ageCell,rateCell);conversionRows.append(tr);
 }
+function updateConversionRows(){
+ const age=Number(document.getElementById('retirementAge').value);
+ if(!Number.isFinite(age)||age<58||age>70)return;
+ const maximumAge=Math.ceil(age);
+ conversionRows.querySelectorAll('tr').forEach(row=>{row.hidden=Number(row.querySelector('input').dataset.age)>maximumAge;});
+ document.querySelector('.rate-grid').closest('section').querySelector('.panel-head p').textContent=`Barème commun, de 58 à ${maximumAge} ans`;
+}
+document.getElementById('retirementAge').addEventListener('input',updateConversionRows);
+updateConversionRows();
 function planMarkup(index){return `<section class="panel plan" data-plan="${index}"><div class="plan-title"><div class="plan-head"><span class="step">0${index}</span><div><h3>Plan ${index}</h3><p>Projection individuelle du plan</p></div></div><span class="badge">TAUX ANNUEL CONSTANT</span></div><div class="fields"><label class="field">Avoir avec rachat à la date de calcul (CHF)<input class="with" type="text" inputmode="decimal" value="100,000.00"></label><label class="field">Avoir sans rachat à la date de calcul (CHF)<input class="without" type="text" inputmode="decimal" value="100,000.00"></label><label class="field">Salaire retraite (CHF)<input class="salary" type="text" inputmode="decimal" value="64,260.00"></label><label class="field">Taux d’intérêt annuel (%)<input class="interest" type="text" inputmode="decimal" value="1.25"></label></div><div class="bonus-head"><div><h4>Bonification par tranche d’âge</h4><p>Pourcentage annuel du salaire retraite · spécifique à ce plan</p></div><button class="add" type="button">＋ Ajouter tranche épargne</button></div><table class="bonus-table"><thead><tr><th>ÂGE DÈS</th><th>ÂGE JUSQU’À</th><th>BONIFICATION (%)</th><th></th></tr></thead><tbody>${initialBrackets().map(([a,b,r])=>bonusRow(a,b,r)).join('')}</tbody></table></section>`;}
 function bonusRow(from,to,rate){return `<tr><td><input class="from" type="number" min="0" max="100" value="${from}" aria-label="Âge dès"></td><td><input class="to" type="number" min="0" max="100" value="${to}" aria-label="Âge jusqu’à"></td><td><input class="bonus" type="text" inputmode="decimal" value="${fmt(rate)}" aria-label="Bonification pour cent"></td><td><button class="remove" type="button" aria-label="Supprimer la tranche">×</button></td></tr>`;}
 function syncPlans(){const count=Number(document.getElementById('planCount').value);const host=document.getElementById('plans');const existing=[...host.querySelectorAll('.plan')];while(existing.length>count)existing.pop().remove();while(host.querySelectorAll('.plan').length<count){const i=host.querySelectorAll('.plan').length+1;host.insertAdjacentHTML('beforeend',planMarkup(i));}wirePlanButtons();}
