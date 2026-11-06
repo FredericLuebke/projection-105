@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Date de retraite financée — brouillon</title>
+<style>
+:root{color-scheme:dark;font:14px 'Segoe UI',sans-serif;color:#e8eef8;background:#0a1220}*{box-sizing:border-box}body{margin:0;padding:28px 32px}h1{font-size:30px;margin:10px 0}h2{font-size:19px}.muted{color:#a5b4ca;line-height:1.6}.badge{color:#fde68a;font-size:12px;letter-spacing:.08em}.panel{background:#111d2e;border:1px solid #293a50;border-radius:14px;padding:22px;margin:20px 0}.fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}label{display:flex;flex-direction:column;gap:8px;color:#b1c2d6}input,select{width:100%;padding:10px;border:1px solid #3a526e;border-radius:8px;background:#0c1726;color:#eef6ff;font:inherit}button{padding:10px 16px;border:1px solid #67b4d8;border-radius:8px;background:#193b55;color:#d9f4ff;cursor:pointer}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #7dd3fc;outline-offset:2px}.primary{background:#8bd5f7;color:#071523;font-weight:700;width:100%;padding:15px}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;font-size:12px}th,td{border:1px solid #314258;padding:9px;text-align:right;white-space:nowrap}th{background:#193149;color:#c5eaff}th:first-child,td:first-child{text-align:left}.brackets input{min-width:80px}.rates{max-width:400px}summary{cursor:pointer;font-size:18px;font-weight:600}.error{color:#fecaca;line-height:1.6}.stale{color:#fde68a}.summary{color:#14532d;background:#dcfce7;border-radius:10px;padding:16px;line-height:1.8}.note{font-size:12px;color:#a5b4ca;line-height:1.6}@media(max-width:600px){body{padding:18px 12px}.fields{grid-template-columns:1fr}.panel{padding:15px}}
+</style></head><body>
+<span class="badge">BROUILLON À TESTER · MODULE INDÉPENDANT</span><h1>Date de retraite financée</h1>
+<p class="muted">Étape 1 : construction des tabelles de rachat. Les données de cet onglet sont indépendantes de la projection du 105 %.</p>
+<form id="financedForm" novalidate>
+<section class="panel"><h2>Scénario et paramètres</h2><div class="fields">
+<label>Méthode de calcul<select id="scenario"><option value="table">Tabelle de rachat</option><option value="projection">Projection de l’avoir — à définir</option></select></label>
+<label>Type de plan<select id="planType"><option>Base</option><option>1e</option></select></label>
+<label>Âge de retraite réglementaire<input id="regAge" type="number" min="58" max="70" step="0.25" value="65"></label>
+<label>Taux d’intérêt des rachats du passé (%)<input id="pastRate" type="text" inputmode="decimal" value="2.00"></label>
+<label>Taux d’intérêt / d’escompte des rachats du futur (%)<input id="futureRate" type="text" inputmode="decimal" value="2.00"></label>
+</div></section>
+<div id="tableInputs"><section class="panel"><h2>Bonifications par tranche d’âge</h2><p class="note">Début d’épargne : première tranche saisie. Valeurs préremplies fictives pour tester le brouillon.</p><div class="scroll"><table class="brackets"><thead><tr><th>Âge dès</th><th>Âge jusqu’à</th><th>Bonification annuelle (%)</th><th>Action</th></tr></thead><tbody id="brackets"></tbody></table></div><p><button id="addBracket" type="button">＋ Ajouter une tranche</button></p></section>
+<section class="panel"><h2>Taux de conversion</h2><p class="note">De 58 ans à l’arrondi supérieur de l’âge réglementaire. Valeurs fictives à remplacer par le barème validé.</p><table class="rates"><thead><tr><th>Âge</th><th>Taux (%)</th></tr></thead><tbody id="rates"></tbody></table></section></div>
+<p id="scenarioNote" class="muted" hidden>Le scénario « Projection de l’avoir » sera implémenté après définition de ses règles. Aucun calcul de ce scénario n’est effectué.</p>
+<button id="buildTables" type="submit" class="primary">Construire les deux tabelles</button><p id="error" class="error" role="alert"></p><p id="stale" class="stale" hidden>Données modifiées : reconstruis les tabelles pour actualiser les résultats.</p>
+</form><div id="tables" aria-live="polite"></div>
+<script src="financed-calculator.js?v=1"></script><script>
+'use strict';
+const $=id=>document.getElementById(id);
+const number=value=>value.trim()===''?NaN:Number(value.replace(/[\u0060'’\s]/g,''));
+const format=(v,d=3)=>v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}).replace(/,/g,'\u0060');
+const ageLabel=v=>Number.isInteger(v)?String(v):format(v,2);
+const rates=new Map(Array.from({length:13},(_,i)=>[58+i,(4.5+i*.1).toFixed(2)]));
+function addBracket(from,to,rate){const tr=document.createElement('tr');tr.innerHTML=`<td><input class="from" type="number" aria-label="Âge dès" value="${from}"></td><td><input class="to" type="number" aria-label="Âge jusqu’à" value="${to}"></td><td><input class="bonus" type="text" inputmode="decimal" aria-label="Bonification annuelle en pour cent" value="${rate}"></td><td><button type="button" aria-label="Supprimer cette tranche">×</button></td>`;tr.querySelector('button').onclick=()=>{tr.remove();markStale();};$('brackets').append(tr);}
+[[18,24,7],[25,34,10],[35,44,15],[45,54,18],[55,70,20]].forEach(b=>addBracket(...b));
+$('addBracket').onclick=()=>{const last=$('brackets').lastElementChild;const from=last?Number(last.querySelector('.to').value)+1:18;addBracket(from,70,'0.00');markStale();};
+function renderRates(){const age=number($('regAge').value);if(!Number.isFinite(age)||age<58||age>70)return;$('rates').replaceChildren();for(let n=58;n<=Math.ceil(age);n++){const tr=document.createElement('tr');tr.innerHTML=`<td>${n}</td><td><input type="text" inputmode="decimal" aria-label="Taux de conversion à ${n} ans"></td>`;const input=tr.querySelector('input');input.value=rates.get(n);input.oninput=()=>rates.set(n,input.value);$('rates').append(tr);}}
+function markStale(){if($('tables').hasChildNodes())$('stale').hidden=false;}
+$('regAge').addEventListener('input',renderRates);renderRates();
+$('financedForm').addEventListener('input',markStale);$('financedForm').addEventListener('change',markStale);
+$('scenario').onchange=()=>{const unavailable=$('scenario').value!=='table';$('tableInputs').hidden=unavailable;$('scenarioNote').hidden=!unavailable;$('buildTables').disabled=unavailable;$('tables').hidden=unavailable;};
+const cell=value=>`<td>${value}</td>`;
+function grid(headers,rows){return `<div class="scroll"><table><thead><tr>${headers.map(h=>`<th scope="col">${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(cell).join('')}</tr>`).join('')}</tbody></table></div>`;}
+$('financedForm').onsubmit=event=>{
+ event.preventDefault();$('error').textContent='';if($('scenario').value!=='table')return;
+ try{
+ const input={type:$('planType').value,retirementAge:number($('regAge').value),pastInterest:number($('pastRate').value),futureInterest:number($('futureRate').value),brackets:[...$('brackets').rows].map(tr=>({from:number(tr.querySelector('.from').value),to:number(tr.querySelector('.to').value),rate:number(tr.querySelector('.bonus').value)})),rates:Object.fromEntries([...rates].map(([a,r])=>[a,number(r)]))};
+ const result=buildPurchaseTables(input);
+ $('tables').innerHTML=`<section class="panel"><h2>Tabelles de rachat — ${input.type}</h2><div class="summary">Retraite réglementaire : <b>${ageLabel(input.retirementAge)} ans</b> · début d’épargne : <b>${result.start} ans</b><br>Coefficient passé à la retraite : <b>${format(result.regulatoryCoefficient*100)} % du salaire</b><br>But de rente réglementaire : <b>${format(result.targetPension*100)} % du salaire annuel</b></div><p class="note">Tous les coefficients sont exprimés en % du salaire assuré. Exemple : un coefficient de 150 % correspond à 1.5 × le salaire. Aucun calcul de date financée n’est encore effectué.</p></section>
+ <section class="panel"><details open><summary>Tabelle de rachat du passé</summary><p class="note">Avoir théorique au début de l’année d’âge, avant la bonification de cette année. Arrondi Excel à trois décimales du coefficient après intérêts, puis ajout de la bonification précédente. Pour 1e : minimum entre l’avoir théorique et 25 % par année d’épargne à bonification non nulle.</p>${grid(['Âge','Bonification (%)','Coefficient théorique (%)','Plafond 1e (%)','Coefficient retenu (%)'],result.past.map(p=>[p.age,p.bonus===null?'—':format(p.bonus*100,2),format(p.raw*100),input.type==='1e'?format(p.cap*100):'Non applicable',format(p.coefficient*100)]))}</details></section>
+ <section class="panel"><details open><summary>Tabelle de rachat du futur</summary><p class="note">Lignes : âge au rachat. Colonnes : âge de retraite visé. Capital compensant l’écart entre le but de rente réglementaire et le but de rente anticipée, arrondi à trois décimales du coefficient à l’âge cible, puis escompté à ${format(input.futureInterest,2)} % par an. « — » : âge au rachat postérieur à la retraite visée. Aucun minimum à zéro n’est imposé au coefficient brut.</p>${grid(['Âge au rachat',...result.targets.map(a=>`Retraite ${ageLabel(a)} ans (%)`)],result.future.map(p=>[p.age,...p.coefficients.map(c=>c===null?'—':format(c*100))]))}</details></section>
+ <section class="panel"><details><summary>Contrôle des buts de rente et du capital à financer</summary>${grid(['Âge de retraite','Taux de conversion (%)','But de rente (% salaire)','Capital à financer (% salaire)'],result.costs.map(c=>[ageLabel(c.age),format(c.conversion*100,4),format(c.pension*100),format(c.capital*100)]))}</details><p class="note">Convention validée pour un âge fractionnaire : interpolation linéaire des coefficients passés retenus et des taux de conversion. L’escompte sur une fraction d’année utilise (1 + taux)<sup>durée</sup>. Les références de cellules décalées du classeur ne sont pas reproduites : chaque but de rente utilise le coefficient du même âge. Barèmes fictifs ; brouillon à valider avant tout usage réel.</p></section>`;
+ $('stale').hidden=true;$('tables').hidden=false;
+ }catch(error){$('tables').replaceChildren();$('stale').hidden=true;$('error').textContent=error.message;}
+};
+</script></body></html>
