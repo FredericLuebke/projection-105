@@ -49,3 +49,45 @@ function buildPurchaseTables(input){
  })}));
  return {input:{...input,brackets:sorted},start,past,targets,costs,future,targetPension,regulatoryCoefficient:pastAt(retirementAge)};
 }
+
+function parseFinancedDate(value){
+ const match=/^(\d{2})\.(\d{2})\.(\d{4})$/.exec(value.trim());
+ if(!match)throw Error('Saisis les dates au format jj.mm.aaaa.');
+ const [day,month,year]=match.slice(1).map(Number),date=new Date(0);
+ date.setFullYear(year,month-1,day);date.setHours(0,0,0,0);
+ if(year<1900||date.getFullYear()!==year||date.getMonth()!==month-1||date.getDate()!==day)throw Error('Date invalide.');
+ return date;
+}
+function calculateFinancedDate(tables,{birth,purchaseDate,lastPurchase,previousPurchases,salary}){
+ if(!(birth instanceof Date)||!(purchaseDate instanceof Date)||!Number.isFinite(birth.getTime())||!Number.isFinite(purchaseDate.getTime())||purchaseDate<=birth)throw Error('Vérifie la naissance et la date du dernier rachat.');
+ if(![lastPurchase,previousPurchases,salary].every(Number.isFinite)||lastPurchase<0||previousPurchases<0||salary<=0)throw Error('Les rachats doivent être positifs ou nuls et le salaire assuré strictement positif.');
+ const retirementMonths=Math.round(tables.input.retirementAge*12);
+ if(Math.abs(retirementMonths-tables.input.retirementAge*12)>1e-8)throw Error('L’âge réglementaire doit correspondre à un nombre entier de mois.');
+ // Excel uses Jan 1 of the birth year, and the first day of the purchase month.
+ const purchaseAge=purchaseDate.getFullYear()-birth.getFullYear()+purchaseDate.getMonth()/12;
+ const low=Math.floor(purchaseAge),fraction=purchaseAge-low;
+ const a=tables.future.find(r=>r.age===low),b=fraction?tables.future.find(r=>r.age===low+1):a;
+ if(!a||!b)throw Error('L’âge LPP au rachat doit être couvert par la tabelle (16 à 70 ans).');
+ const endpoints=tables.targets.map((age,index)=>{
+  const coefficient=a.coefficients[index]*(1-fraction)+b.coefficients[index]*fraction;
+  const maximum=salary*coefficient;
+  return {months:Math.round(age*12),coefficient,maximum,remaining:Math.max(0,maximum-previousPurchases)};
+ });
+ const firstDate=months=>new Date(birth.getFullYear(),birth.getMonth()+months+1,1);
+ const regulatoryDate=firstDate(retirementMonths);
+ if(purchaseDate>regulatoryDate)throw Error('Le dernier rachat est postérieur à la date de retraite réglementaire.');
+ const candidates=[];
+ for(let months=58*12;months<=retirementMonths;months++){
+  const date=firstDate(months);if(date<purchaseDate)continue;
+  const upper=endpoints.find(p=>p.months>=months),lower=[...endpoints].reverse().find(p=>p.months<=months);
+  if(!upper||!lower)throw Error('Interpolation hors de la tabelle.');
+  const weight=upper.months===lower.months?0:(months-lower.months)/(upper.months-lower.months);
+  // Match Excel: deduct prior purchases at each annual endpoint, then interpolate monthly.
+  const required=lower.remaining*(1-weight)+upper.remaining*weight;
+  const maximum=lower.maximum*(1-weight)+upper.maximum*weight;
+  const funded=required<=lastPurchase;
+  candidates.push({date,months,required,maximum,funded,balance:lastPurchase-required});
+ }
+ const financed=candidates.find(c=>c.funded)||null;
+ return {financed,candidates,endpoints,purchaseAge,regulatoryDate,totalPurchases:lastPurchase+previousPurchases,lastPurchase,previousPurchases,salary};
+}

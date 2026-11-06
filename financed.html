@@ -55,17 +55,27 @@ input[readonly]{color:#91a0b6;background:#142237}
 <label>Taux d’intérêt des rachats du passé (%)<input id="pastRate" type="text" inputmode="decimal" value="2.00"></label>
 <label>Taux d’intérêt / d’escompte des rachats du futur (%)<input id="futureRate" type="text" inputmode="decimal" value="2.00"></label>
 </div></section>
+<section class="panel" id="fundingInputs"><h2>Données du financement · un seul plan</h2><div class="fields">
+<label>Date de naissance<input id="fundBirth" type="text" placeholder="jj.mm.aaaa" maxlength="10" value="01.01.1968"></label>
+<label>Date du dernier rachat futur<input id="fundDate" type="text" placeholder="jj.mm.aaaa" maxlength="10"></label>
+<label>Montant du dernier rachat futur (CHF)<input id="lastPurchase" type="text" inputmode="decimal" value="0.00"></label>
+<label>Total des rachats futurs effectués auparavant (CHF)<input id="previousPurchases" type="text" inputmode="decimal" value="0.00"></label>
+<label>Salaire assuré à la date du rachat (CHF)<input id="fundSalary" type="text" inputmode="decimal" value="100&#96;000.00"></label>
+</div><p class="note">Les rachats antérieurs correspondent au total avant saisie du dernier rachat (élément spécifique 7 de la photo). Ils ne sont pas ajoutés une seconde fois. Aucun montant ni intérêt historique n’est reconstitué automatiquement.</p></section>
 <div id="tableInputs"><section class="panel"><h2>Bonifications par tranche d’âge</h2><p class="note">Début d’épargne : première tranche saisie. Valeurs préremplies fictives pour tester le brouillon.</p><div class="scroll"><table class="brackets"><thead><tr><th>Âge dès</th><th>Âge jusqu’à</th><th>Bonification annuelle (%)</th><th>Action</th></tr></thead><tbody id="brackets"></tbody></table></div><p><button id="addBracket" type="button">＋ Ajouter une tranche</button></p></section>
 <section class="panel"><h2>Taux de conversion</h2><p id="rateSource" class="note">Base : valeurs fictives à remplacer par le barème validé.</p><p class="note">Taux modifiables. Changer de sexe ou d’année charge le barème correspondant. Pour 2026, les taux après 65 ans ne sont pas fournis : ils doivent être saisis si nécessaires.</p><table class="rates"><thead><tr><th>Âge</th><th>Taux (%)</th></tr></thead><tbody id="rates"></tbody></table></section></div>
 <p id="scenarioNote" class="muted" hidden>Le scénario « Projection de l’avoir » sera implémenté après définition de ses règles. Aucun calcul de ce scénario n’est effectué.</p>
-<button id="buildTables" type="submit" class="primary">Construire les deux tabelles</button><p id="error" class="error" role="alert"></p><p id="stale" class="stale" hidden>Données modifiées : reconstruis les tabelles pour actualiser les résultats.</p>
-</form><div id="tables" aria-live="polite"></div>
-<script src="financed-calculator.js?v=2"></script><script>
+<button id="buildTables" type="submit" class="primary">Construire les tabelles et calculer la date financée</button><p id="error" class="error" role="alert"></p><p id="stale" class="stale" hidden>Données modifiées : relance le calcul pour actualiser les résultats.</p>
+</form><div id="fundingResult" aria-live="polite"></div><div id="tables" aria-live="polite"></div>
+<script src="financed-calculator.js?v=5"></script><script>
 'use strict';
 const $=id=>document.getElementById(id);
 const number=value=>value.trim()===''?NaN:Number(value.replace(/[\u0060'’\s]/g,''));
 const format=(v,d=3)=>v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}).replace(/,/g,'\u0060');
 const ageLabel=v=>Number.isInteger(v)?String(v):format(v,2);
+const dateLabel=date=>`${String(date.getDate()).padStart(2,'0')}.${String(date.getMonth()+1).padStart(2,'0')}.${date.getFullYear()}`;
+$('fundDate').value=`01.01.${new Date().getFullYear()}`;
+['lastPurchase','previousPurchases','fundSalary'].forEach(id=>$(id).addEventListener('blur',()=>{const v=number($(id).value);if(Number.isFinite(v))$(id).value=format(v,2);}));
 const rates=new Map(Array.from({length:13},(_,i)=>[58+i,(4.5+i*.1).toFixed(2)]));
 const savedRateSets=new Map([['Base',rates]]);
 let rateSetKey='Base',baseInterests=['2.00','2.00'];
@@ -91,7 +101,7 @@ function renderRates(){const age=number($('regAge').value);if(!Number.isFinite(a
 function markStale(){if($('tables').hasChildNodes())$('stale').hidden=false;}
 $('regAge').addEventListener('input',renderRates);renderRates();
 $('financedForm').addEventListener('input',markStale);$('financedForm').addEventListener('change',markStale);
-$('scenario').onchange=()=>{const unavailable=$('scenario').value!=='table';$('tableInputs').hidden=unavailable;$('scenarioNote').hidden=!unavailable;$('buildTables').disabled=unavailable;$('tables').hidden=unavailable;};
+$('scenario').onchange=()=>{const unavailable=$('scenario').value!=='table';$('tableInputs').hidden=unavailable;$('fundingInputs').hidden=unavailable;$('fundingResult').hidden=unavailable;$('scenarioNote').hidden=!unavailable;$('buildTables').disabled=unavailable;$('tables').hidden=unavailable;};
 const cell=value=>`<td>${value}</td>`;
 function grid(headers,rows){return `<div class="scroll"><table><thead><tr>${headers.map(h=>`<th scope="col">${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(cell).join('')}</tr>`).join('')}</tbody></table></div>`;}
 $('financedForm').onsubmit=event=>{
@@ -99,11 +109,15 @@ $('financedForm').onsubmit=event=>{
  try{
  const input={type:$('planType').value,retirementAge:number($('regAge').value),pastInterest:number($('pastRate').value),futureInterest:number($('futureRate').value),brackets:[...$('brackets').rows].map(tr=>({from:number(tr.querySelector('.from').value),to:number(tr.querySelector('.to').value),rate:number(tr.querySelector('.bonus').value)})),rates:Object.fromEntries([...rates].map(([a,r])=>[a,number(r)]))};
  const result=buildPurchaseTables(input);
+ const funding=calculateFinancedDate(result,{birth:parseFinancedDate($('fundBirth').value),purchaseDate:parseFinancedDate($('fundDate').value),lastPurchase:number($('lastPurchase').value),previousPurchases:number($('previousPurchases').value),salary:number($('fundSalary').value)});
+ const financed=funding.financed;
+ $('fundingResult').innerHTML=`<section class="panel"><h2>Date de retraite financée · selon la tabelle</h2><div class="summary">${financed?`Première date entièrement financée<br><strong style="font-size:32px">${dateLabel(financed.date)}</strong><br>Âge de retraite financé : <b>${Math.floor(financed.months/12)} ans et ${financed.months%12} mois</b>`:'Aucune date entièrement financée dans la période recherchée.'}</div>${financed?`<p>Rachat encore nécessaire à cette date : <b>CHF ${format(financed.required,2)}</b><br>Dernier rachat disponible : <b>CHF ${format(funding.lastPurchase,2)}</b><br>Solde après financement : <b>CHF ${format(financed.balance,2)}</b></p>`:''}<p class="note">Date d’effet : premier jour suivant le mois où l’âge cible est atteint, comme dans le classeur. Recherche dès 58 ans, sans date antérieure au dernier rachat, jusqu’au ${dateLabel(funding.regulatoryDate)}. Égalité autorisée ; comparaison sans arrondi d’affichage.</p><details><summary>Détail du financement mensuel</summary><p class="note">Âge LPP au rachat : ${format(funding.purchaseAge,4)}. Interpolation du facteur entre les deux âges LPP ; salaire × coefficient, déduction des rachats antérieurs, minimum à zéro, puis interpolation mensuelle du besoin restant entre les âges de retraite. La première ligne financée est retenue.</p>${grid(['Date d’effet','Âge cible','Besoin restant (CHF)','Dernier rachat (CHF)','Financé'],funding.candidates.map(c=>[dateLabel(c.date),`${Math.floor(c.months/12)}a ${c.months%12}m`,format(c.required,2),format(funding.lastPurchase,2),c===financed?'Oui — date retenue':c.funded?'Oui':'Non']))}</details></section>`;
  $('tables').innerHTML=`<section class="panel"><h2>Tabelles de rachat — ${input.type}</h2><div class="summary">Retraite réglementaire : <b>${ageLabel(input.retirementAge)} ans</b> · début d’épargne : <b>${result.start} ans</b><br>Coefficient passé à la retraite : <b>${format(result.regulatoryCoefficient*100)} % du salaire</b><br>But de rente réglementaire : <b>${format(result.targetPension*100)} % du salaire annuel</b></div><p class="note">Tous les coefficients sont exprimés en % du salaire assuré. Exemple : un coefficient de 150 % correspond à 1.5 × le salaire. Aucun calcul de date financée n’est encore effectué.</p></section>
  <section class="panel"><details open><summary>Tabelle de rachat du passé</summary><p class="note">Avoir théorique au début de l’année d’âge, avant la bonification de cette année. Arrondi Excel à trois décimales du coefficient après intérêts, puis ajout de la bonification précédente. Pour 1e : minimum entre l’avoir théorique et 25 % par année d’épargne à bonification non nulle.</p>${grid(['Âge','Bonification (%)','Coefficient théorique (%)','Plafond 1e (%)','Coefficient retenu (%)'],result.past.map(p=>[p.age,p.bonus===null?'—':format(p.bonus*100,2),format(p.raw*100),input.type==='1e'?format(p.cap*100):'Non applicable',format(p.coefficient*100)]))}</details></section>
  <section class="panel"><details open><summary>Tabelle de rachat du futur</summary><p class="note">Lignes : âge au rachat. Colonnes : âge de retraite visé. Capital compensant l’écart entre les buts de rente, arrondi à trois décimales du coefficient à l’âge cible, puis escompté à ${format(input.futureInterest,2)} % par an. Comme dans le nouveau classeur : zéro après la retraite visée ; propagation arrière interrompue par une année à bonification nulle. Aucun minimum à zéro n’est imposé au capital brut.</p>${grid(['Âge au rachat',...result.targets.map(a=>`Retraite ${ageLabel(a)} ans (%)`)],result.future.map(p=>[p.age,...p.coefficients.map(c=>format(c*100))]))}</details></section>
  <section class="panel"><details><summary>Contrôle des buts de rente et du capital à financer</summary>${grid(['Âge de retraite','Taux de conversion (%)','But de rente (% salaire)','Capital à financer (% salaire)'],result.costs.map(c=>[ageLabel(c.age),format(c.conversion*100,4),format(c.pension*100),format(c.capital*100)]))}</details><p class="note">Convention validée pour un âge fractionnaire : interpolation linéaire des coefficients passés retenus et des taux de conversion. L’escompte sur une fraction d’année utilise (1 + taux)<sup>durée</sup>. Les références de cellules décalées du classeur ne sont pas reproduites : chaque but de rente utilise le coefficient du même âge. Barèmes fictifs ; brouillon à valider avant tout usage réel.</p></section>`;
  $('stale').hidden=true;$('tables').hidden=false;
- }catch(error){$('tables').replaceChildren();$('stale').hidden=true;$('error').textContent=error.message;}
+ $('tables').querySelector('.note').textContent='Tous les coefficients sont exprimés en % du salaire assuré. Exemple : un coefficient de 150 % correspond à 1.5 × le salaire. Le calcul du financement est affiché au-dessus.';
+ }catch(error){$('fundingResult').replaceChildren();$('tables').replaceChildren();$('stale').hidden=true;$('error').textContent=error.message;}
 };
 </script></body></html>
