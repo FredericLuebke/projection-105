@@ -96,10 +96,10 @@ function projectionPdf(output,refs,created=new Date()){
   return [dateFmt(month.date),`${Math.floor(age/12)}a ${age%12}m`,applicable?rate(conversionAt(output.birth,month.date)):'-',money(without),money(withPurchase),annual(without,month.date),annual(withPurchase,month.date),money(output.limit)];
  });
  const highlighted=(data)=>{if(data.section==='body'&&output.lastSafe&&data.row.raw[0]===dateFmt(output.lastSafe.date)){data.cell.styles.fillColor=[220,252,231];data.cell.styles.fontStyle='bold';}};
- table(['Fin de mois','Age','Conversion (%)','Avoir sans (CHF)','Avoir avec (CHF)','Rente annuelle sans (CHF)','Rente annuelle avec (CHF)','Limite 105% (CHF)'],cumulative,{didParseCell:highlighted,columnStyles:{0:{cellWidth:26},1:{cellWidth:18},2:{cellWidth:25},3:{cellWidth:40},4:{cellWidth:40},5:{cellWidth:40},6:{cellWidth:40},7:{cellWidth:40}}});
+ table(['Fin de mois','Age','Conversion\n(%)','Avoir\nsans rachat\n(CHF)','Avoir\navec rachat\n(CHF)','Rente annuelle\nsans rachat\n(CHF)','Rente annuelle\navec rachat\n(CHF)','Limite 105%\n(CHF)'],cumulative,{didParseCell:highlighted,columnStyles:{0:{cellWidth:26},1:{cellWidth:18},2:{cellWidth:25},3:{cellWidth:40},4:{cellWidth:40},5:{cellWidth:40},6:{cellWidth:40},7:{cellWidth:40}}});
  for(const result of output.results){
   heading(`Annexe - détail mensuel ${result.name}`,true);
-  table(['Fin de mois','Age LPP','Bonification du mois (CHF)','Intérêts sans (CHF)','Intérêts avec (CHF)','Avoir sans (CHF)','Avoir avec (CHF)','Rente annuelle sans (CHF)','Rente annuelle avec (CHF)'],result.without.map((m,i)=>{
+   table(['Fin de mois','Age LPP','Bonification\ndu mois\n(CHF)','Intérêts\nsans rachat\n(CHF)','Intérêts\navec rachat\n(CHF)','Avoir\nsans rachat\n(CHF)','Avoir\navec rachat\n(CHF)','Rente annuelle\nsans rachat\n(CHF)','Rente annuelle\navec rachat\n(CHF)'],result.without.map((m,i)=>{
    const withMonth=result.withPurchase[i];return [dateFmt(m.date),m.lppAge,money(m.bonus),money(m.interest),money(withMonth.interest),money(m.balance),money(withMonth.balance),annual(m.balance,m.date),annual(withMonth.balance,m.date)];
     }),{didParseCell:highlighted,columnStyles:{0:{cellWidth:26},1:{cellWidth:15},2:{cellWidth:30},3:{cellWidth:30},4:{cellWidth:30},5:{cellWidth:34},6:{cellWidth:34},7:{cellWidth:35},8:{cellWidth:35}}});
  }
