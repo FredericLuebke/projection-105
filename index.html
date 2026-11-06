@@ -135,10 +135,13 @@ document.getElementById('calculate').addEventListener('click',()=>{
  try{
   error.style.display='none';
   const output=calc();
+  const withPurchaseBalance=output.results.reduce((sum,plan)=>sum+plan.withPurchase[plan.withPurchase.length-1].balance,0);
+  const withPurchasePension=output.results.reduce((sum,plan)=>sum+plan.withPurchase[plan.withPurchase.length-1].balance*output.conversion/100,0);
   const status=output.firstExceeded
     ? output.lastSafe?'Dernière échéance mensuelle respectant la limite de 105 %.':'La limite est déjà dépassée au premier mois évalué : aucune date admissible dans la période.'
    :'Aucun dépassement jusqu’à la retraite réglementaire.';
-  host.innerHTML=`<section class="result-summary"><small>RENTE ANNUELLE SANS RACHAT À LA RETRAITE RÉGLEMENTAIRE · TOUS PLANS</small><div class="sum">CHF ${fmt(output.reference)}</div><footer><span>Retraite réglementaire</span><strong>${dateFmt(output.end)}</strong></footer></section>
+  host.innerHTML=`<section class="result-summary with-purchase-summary"><small>PROJECTION AVEC RACHAT À LA RETRAITE RÉGLEMENTAIRE · TOUS PLANS</small><div class="metric"><span>Avoir projeté avec rachat</span><b>CHF ${fmt(withPurchaseBalance)}</b></div><div style="margin-top:16px">Rente annuelle de retraite avec rachat</div><div class="sum">CHF ${fmt(withPurchasePension)}</div><p style="color:#fca5a5;font-weight:700;line-height:1.6">Comparer la rente calculée ci-dessus avec la rente de retraite projetée de la photo THR</p><footer><span>Retraite réglementaire</span><strong>${dateFmt(output.end)}</strong></footer></section>
+   <section class="result-summary"><small>RENTE ANNUELLE SANS RACHAT À LA RETRAITE RÉGLEMENTAIRE · TOUS PLANS</small><div class="sum">CHF ${fmt(output.reference)}</div><footer><span>Retraite réglementaire</span><strong>${dateFmt(output.end)}</strong></footer></section>
    <section class="result-summary"><small>MONTANT LIMITE ANNUEL · 105 %</small><div class="sum">CHF ${fmt(output.limit)}</div></section>
     <section class="panel projection-105"><h3>Projection du 105%</h3><p>${status}</p>
     ${output.lastSafe?`<div class="threshold-date"><span>Dernière fin de mois sans dépassement</span><strong>${dateFmt(output.lastSafe.date)}</strong></div><div class="threshold-date"><span>Âge à cette date</span><strong>${ageFmt(output.birth,output.lastSafe.date)}</strong></div><div class="metric"><span>Rente annuelle avec rachat à cette date</span><b>CHF ${fmt(output.lastSafe.pension)}</b></div>`:''}
