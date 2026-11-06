@@ -1,9 +1,14 @@
 'use strict';
+const ONE_E_CONVERSION_RATES={
+ 2026:{Homme:[2.96,3.05,3.13,3.23,3.33,3.43,3.54,3.66],Femme:[3.12,3.22,3.32,3.43,3.54,3.67,3.80,3.94]},
+ 2027:{Homme:[3.01,3.10,3.19,3.29,3.40,3.51,3.63,3.76,3.90,4.04,4.20,4.37,4.55],Femme:[3.13,3.23,3.33,3.44,3.56,3.69,3.82,3.96,4.12,4.28,4.46,4.65,4.86]}
+};
 // Independent module: no reads or writes to the 105% form or calculation globals.
 function buildPurchaseTables(input){
  const {type,pastInterest,futureInterest,retirementAge,brackets,rates}=input;
  const finite=(v,min,max)=>Number.isFinite(v)&&v>=min&&v<=max;
  if(!['Base','1e'].includes(type)||!finite(pastInterest,0,100)||!finite(futureInterest,0,100)||!finite(retirementAge,58,70))throw Error('Vérifie le type de plan, les intérêts (0 à 100 %) et l’âge réglementaire (58 à 70 ans).');
+ if(type==='1e'&&(pastInterest!==0||futureInterest!==0))throw Error('Selon le classeur, les taux d’intérêt du plan 1e doivent être de 0 %.');
  const sorted=brackets.map(b=>({...b})).sort((a,b)=>a.from-b.from);
  if(!sorted.length)throw Error('Ajoute au moins une tranche de bonification.');
  sorted.forEach((b,i)=>{
@@ -14,7 +19,7 @@ function buildPurchaseTables(input){
  if(start>58)throw Error('Le début d’épargne doit être au plus tard à 58 ans pour construire les tabelles dès 58 ans.');
  if(start>=retirementAge||sorted.at(-1).to<max-1)throw Error('Les bonifications doivent couvrir toutes les années d’épargne avant la retraite.');
  const round3=v=>Math.round((v+Number.EPSILON)*1000)/1000;
- const bonus=age=>{const b=sorted.find(b=>age>=b.from&&age<=b.to);if(!b)throw Error(`Bonification manquante à ${age} ans.`);return b.rate/100;};
+ const bonus=age=>{if(age<start||age>retirementAge)return 0;const b=sorted.find(b=>age>=b.from&&age<=b.to);if(!b)throw Error(`Bonification manquante à ${age} ans.`);return b.rate/100;};
  const rateAt=age=>{
   const low=Math.floor(age),high=Math.ceil(age),fraction=age-low;
   if(!finite(rates[low],0.000001,100)||!finite(rates[high],0.000001,100))throw Error(`Taux de conversion strictement positif requis à ${low}${high!==low?' et '+high:''} ans.`);
@@ -22,8 +27,12 @@ function buildPurchaseTables(input){
  };
  let raw=0,cap=0;
  const past=[];
- for(let age=start;age<=max;age++){
-  if(age>start){const previous=bonus(age-1);raw=round3(raw*(1+pastInterest/100))+previous;cap+=previous!==0?.25:0;}
+ for(let age=16;age<=70;age++){
+    if(age>16&&age<=max){
+     const previous=bonus(age-1),fractionalEndpoint=age===max&&!Number.isInteger(retirementAge);
+     // Excel freezes the late-career accumulation when the current savings rate is zero.
+     if(age<55||bonus(age)!==0||fractionalEndpoint){raw=round3(raw*(1+pastInterest/100))+previous;cap+=previous!==0?.25:0;}
+    }
   past.push({age,raw,cap,coefficient:type==='1e'?Math.min(raw,cap):raw,bonus:age<retirementAge?bonus(age):null});
  }
  const pastAt=age=>{const low=Math.floor(age),fraction=age-low;const a=past.find(p=>p.age===low),b=fraction?past.find(p=>p.age===low+1):a;return a.coefficient*(1-fraction)+b.coefficient*fraction;};
@@ -32,6 +41,11 @@ function buildPurchaseTables(input){
  const costs=targets.map(age=>({age,conversion:rateAt(age),pension:pastAt(age)*rateAt(age),capital:round3((targetPension-pastAt(age)*rateAt(age))/rateAt(age))}));
  // At target retirement age: rounded capital to compensate the pension difference.
  // Before that age: annual compound discount. Beyond target: not applicable.
- const future=past.filter(row=>row.age<=retirementAge).map(row=>({age:row.age,coefficients:costs.map(c=>row.age<=c.age?c.capital/Math.pow(1+futureInterest/100,c.age-row.age):null)}));
+ const future=past.map(row=>({age:row.age,coefficients:costs.map(c=>{
+  if(row.age>c.age)return 0;
+  // Excel propagates backwards only while the current year's savings rate is nonzero.
+  for(let age=row.age;age<c.age;age++)if(bonus(age)===0)return 0;
+  return c.capital/Math.pow(1+futureInterest/100,c.age-row.age);
+ })}));
  return {input:{...input,brackets:sorted},start,past,targets,costs,future,targetPension,regulatoryCoefficient:pastAt(retirementAge)};
 }
