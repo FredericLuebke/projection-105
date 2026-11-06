@@ -120,8 +120,7 @@ document.getElementById('pdfForm').addEventListener('submit',async event=>{
   // Synchronous snapshot and refresh: the PDF and screen use the current form, never an old result.
   const output=calc();document.getElementById('calculate').click();
   const created=new Date(),doc=projectionPdf(output,refs,created);
-  const stamp=`${created.getFullYear()}${String(created.getMonth()+1).padStart(2,'0')}${String(created.getDate()).padStart(2,'0')}_${String(created.getHours()).padStart(2,'0')}${String(created.getMinutes()).padStart(2,'0')}${String(created.getSeconds()).padStart(2,'0')}`;
-  await doc.save(`Projection105_oeuvre-${safePdfName(refs.oeuvre)}_personne-${safePdfName(refs.personne)}_${stamp}.pdf`,{returnPromise:true});
+   await doc.save(`Projection105_oeuvre-${safePdfName(refs.oeuvre)}_personne-${safePdfName(refs.personne)}.pdf`,{returnPromise:true});
   pdfDialog.close();
  }catch(e){error.textContent=e.message||'Impossible de générer le PDF.';}
  finally{submit.disabled=false;pdfButton.disabled=false;}
