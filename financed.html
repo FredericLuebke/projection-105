@@ -2,6 +2,43 @@
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Date de retraite financée — brouillon</title>
 <style>
 :root{color-scheme:dark;font:14px 'Segoe UI',sans-serif;color:#e8eef8;background:#0a1220}*{box-sizing:border-box}body{margin:0;padding:28px 32px}h1{font-size:30px;margin:10px 0}h2{font-size:19px}.muted{color:#a5b4ca;line-height:1.6}.badge{color:#fde68a;font-size:12px;letter-spacing:.08em}.panel{background:#111d2e;border:1px solid #293a50;border-radius:14px;padding:22px;margin:20px 0}.fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}label{display:flex;flex-direction:column;gap:8px;color:#b1c2d6}input,select{width:100%;padding:10px;border:1px solid #3a526e;border-radius:8px;background:#0c1726;color:#eef6ff;font:inherit}button{padding:10px 16px;border:1px solid #67b4d8;border-radius:8px;background:#193b55;color:#d9f4ff;cursor:pointer}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #7dd3fc;outline-offset:2px}.primary{background:#8bd5f7;color:#071523;font-weight:700;width:100%;padding:15px}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;font-size:12px}th,td{border:1px solid #314258;padding:9px;text-align:right;white-space:nowrap}th{background:#193149;color:#c5eaff}th:first-child,td:first-child{text-align:left}.brackets input{min-width:80px}.rates{max-width:400px}summary{cursor:pointer;font-size:18px;font-weight:600}.error{color:#fecaca;line-height:1.6}.stale{color:#fde68a}.summary{color:#14532d;background:#dcfce7;border-radius:10px;padding:16px;line-height:1.8}.note{font-size:12px;color:#a5b4ca;line-height:1.6}@media(max-width:600px){body{padding:18px 12px}.fields{grid-template-columns:1fr}.panel{padding:15px}}
+/* Visual alignment with Projection 105%; scoped to this independent page. */
+[hidden]{display:none!important}
+body{max-width:1500px;margin:auto;padding:28px 40px 45px;background:radial-gradient(ellipse at 70% -15%,#19314d 0,transparent 42%),#0a1220}
+h1{font-size:clamp(32px,4vw,48px);letter-spacing:-.05em;line-height:1.04;margin:17px 0 12px}
+body>.badge{font:11px Consolas,monospace;letter-spacing:.13em;color:#7dd3fc}
+body>.muted{max-width:650px;color:#9baac0;margin-bottom:27px}
+#financedForm{max-width:860px}
+.panel{background:linear-gradient(145deg,#142235,#0f1b2b);padding:19px;margin:0 0 16px;box-shadow:0 8px 26px #0002}
+h2{font-size:17px;margin:0 0 17px}
+.fields{grid-template-columns:repeat(2,minmax(0,320px));gap:14px;align-items:end}
+label{gap:7px;color:#9baac0;font-size:11px;min-width:0}
+input,select{height:38px;padding:0 10px;border-color:#2b3d53;color:#e7eef8;font:13px Consolas,monospace}
+input:focus,select:focus{border-color:#54a9d2;box-shadow:0 0 0 3px #38bdf81c}
+input[readonly]{color:#91a0b6;background:#142237}
+.note{font-size:11px;color:#91a0b6}
+.brackets{width:auto;min-width:440px}
+.brackets th{white-space:normal;font:10px Consolas,monospace}
+.brackets td{padding:5px 7px}
+.brackets input{width:100%;max-width:150px;height:30px;font-size:12px;min-width:75px}
+.brackets td:nth-child(1),.brackets td:nth-child(2){width:105px}
+.brackets td:nth-child(3){width:170px}
+.brackets button{padding:2px 8px;border:0;background:transparent;color:#9aabba;font-size:18px}
+.rates{width:310px;max-width:100%}
+.rates th,.rates td{padding:4px 8px;height:31px}
+.rates th{font-size:10px;color:#aabbd0;background:#192a3e}
+.rates td:first-child{width:90px;color:#cbd8e8}
+.rates input{height:25px;padding:0 7px;font-size:12px}
+#addBracket{font-size:12px;padding:8px 10px;background:#142a40;color:#aee4ff;border-color:#35617d}
+.primary{padding:14px 18px;border-color:#76c9ee;border-radius:10px;background:linear-gradient(100deg,#8bd5f7,#61b6df);font:700 14px 'Segoe UI',sans-serif}
+.primary:disabled{opacity:.5;cursor:not-allowed}
+#tables{margin-top:27px}
+#tables .panel{padding:19px}
+#tables summary{font-size:17px}
+#tables .scroll{margin-top:15px}
+#tables table{font-variant-numeric:tabular-nums}
+@media(max-width:900px){body{padding:24px 20px 36px}}
+@media(max-width:520px){body{padding:18px 12px}.fields{grid-template-columns:minmax(0,1fr)}.panel,#tables .panel{padding:14px}.brackets{min-width:390px}}
 </style></head><body>
 <span class="badge">BROUILLON À TESTER · MODULE INDÉPENDANT</span><h1>Date de retraite financée</h1>
 <p class="muted">Étape 1 : construction des tabelles de rachat. Les données de cet onglet sont indépendantes de la projection du 105 %.</p>
