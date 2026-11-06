@@ -58,6 +58,86 @@ function parseFinancedDate(value){
  if(year<1900||date.getFullYear()!==year||date.getMonth()!==month-1||date.getDate()!==day)throw Error('Date invalide.');
  return date;
 }
+// Independent copy of the 105% monthly convention: interest on January's base,
+// not monthly compound interest. No automatic purchase added to initial balance.
+function projectFinancedAssets({birth,start,end,initial,salary,interest,brackets}){
+ const bonusFor=age=>{
+  const hits=brackets.filter(b=>age>=b.from&&age<=b.to);
+  if(hits.length!==1)throw Error(`Une seule tranche doit couvrir l’âge LPP ${age}.`);
+  return hits[0].rate;
+ };
+ let balance=initial;
+ const fraction=start.getMonth()/12;
+ const initialBonus=salary*bonusFor(start.getFullYear()-birth.getFullYear())/100;
+ let base=(balance-initialBonus*fraction)/(1+interest/100*fraction);
+ if(base<0)throw Error('Reconstitution du 1er janvier impossible avec cet avoir.');
+ const months=[];
+ for(let cursor=new Date(start);cursor<=end;cursor=new Date(cursor.getFullYear(),cursor.getMonth()+1,1)){
+  if(cursor.getMonth()===0&&cursor.getTime()!==start.getTime())base=balance;
+  const date=new Date(cursor.getFullYear(),cursor.getMonth()+1,0);
+  const bonus=salary*bonusFor(date.getFullYear()-birth.getFullYear())/100/12;
+  const monthlyInterest=base*interest/100/12;
+  balance+=monthlyInterest+bonus;
+  if(!Number.isFinite(balance))throw Error('Projection hors limites.');
+  months.push({date,balance,interest:monthlyInterest,bonus,lppAge:date.getFullYear()-birth.getFullYear()});
+ }
+ return months;
+}
+function buildProjectedPurchaseMaximums({birth,start,initial,salary,interest,brackets,rates,retirementAge,minimumAge}){
+ const validDate=d=>d instanceof Date&&Number.isFinite(d.getTime());
+ if(!validDate(birth)||!validDate(start)||start<=birth||start.getDate()!==1)throw Error('La date de l’avoir doit être le premier jour du mois, après la naissance.');
+ if(![initial,salary,interest].every(v=>Number.isFinite(v)&&v>=0)||interest>100)throw Error('Avoir et salaire positifs ou nuls requis ; intérêt de 0 à 100 %.');
+ const toMonths=age=>{const m=Math.round(age*12);if(!Number.isFinite(age)||Math.abs(m-age*12)>1e-8)throw Error('Les âges doivent correspondre à un nombre entier de mois.');return m;};
+ const regulatoryMonths=toMonths(retirementAge),minimumMonths=toMonths(minimumAge);
+ if(minimumAge<58||retirementAge>70||minimumAge>retirementAge)throw Error('L’âge anticipé doit être compris entre 58 ans et l’âge réglementaire (maximum 70 ans).');
+ if(!brackets.length||brackets.some(b=>!Number.isInteger(b.from)||!Number.isInteger(b.to)||b.from>b.to||!Number.isFinite(b.rate)||b.rate<0||b.rate>100))throw Error('Vérifie les tranches de bonification et leurs taux (0 à 100 %).');
+ const ageMonths=date=>(date.getFullYear()-birth.getFullYear())*12+date.getMonth()-birth.getMonth();
+ const endAt=months=>new Date(birth.getFullYear(),birth.getMonth()+months+1,0);
+ const end=endAt(regulatoryMonths);
+ if(start>end)throw Error('La date de l’avoir est postérieure à la retraite réglementaire.');
+ for(let age=start.getFullYear()-birth.getFullYear();age<=end.getFullYear()-birth.getFullYear();age++)if(brackets.filter(b=>age>=b.from&&age<=b.to).length!==1)throw Error(`Une seule tranche doit couvrir l’âge LPP ${age}.`);
+ const conversionAt=months=>{
+  const low=Math.floor(months/12),rem=months%12,lower=rates[low],upper=rem?rates[low+1]:lower;
+  if(![lower,upper].every(v=>Number.isFinite(v)&&v>0&&v<=100))throw Error(`Taux de conversion strictement positif requis à ${low}${rem?' et '+(low+1):''} ans.`);
+  return (lower*(12-rem)+upper*rem)/12;
+ };
+ const projection=projectFinancedAssets({birth,start,end,initial,salary,interest,brackets});
+ const regulatoryBalance=projection.at(-1).balance,regulatoryConversion=conversionAt(regulatoryMonths);
+ const regulatoryPension=regulatoryBalance*regulatoryConversion/100;
+ const startMonths=ageMonths(start),firstMonths=Math.max(minimumMonths,startMonths);
+ const targetMonths=[firstMonths];
+ for(let m=(Math.floor(firstMonths/12)+1)*12;m<regulatoryMonths;m+=12)targetMonths.push(m);
+ if(firstMonths!==regulatoryMonths)targetMonths.push(regulatoryMonths);
+ const endpoints=targetMonths.map(months=>{
+  // When the minimum date is already reached, use the actual opening balance,
+  // not a balance with an extra month's accrual at the purchase date.
+  const atStart=months===startMonths&&minimumMonths<=startMonths&&months!==regulatoryMonths;
+  const date=atStart?new Date(start):endAt(months);
+  const row=projection.find(p=>ageMonths(p.date)===months);
+  const balance=atStart?initial:row.balance,conversion=conversionAt(months);
+  const pension=balance*conversion/100,delta=regulatoryPension-pension;
+  const maximum=delta/(conversion/100);
+  if(![pension,delta,maximum].every(Number.isFinite))throw Error('Montant projeté hors limites.');
+  return {months,date,balance,conversion,pension,delta,maximum};
+ });
+ return {birth,start,initial,salary,interest,projection,endpoints,firstMonths,regulatoryMonths,regulatoryDate:end,regulatoryBalance,regulatoryConversion,regulatoryPension};
+}
+// Stage 2 deliberately operates only on the maxima from stage 1.
+function financeProjectedMaximums(maximums,{lastPurchase,previousPurchases}){
+ if(![lastPurchase,previousPurchases].every(v=>Number.isFinite(v)&&v>=0))throw Error('Les montants des rachats doivent être positifs ou nuls.');
+ const endpoints=maximums.endpoints.map(p=>({...p,remaining:Math.max(0,p.maximum-previousPurchases)}));
+ const candidates=[];
+ for(let months=maximums.firstMonths;months<=maximums.regulatoryMonths;months++){
+  const upper=endpoints.find(p=>p.months>=months),lower=[...endpoints].reverse().find(p=>p.months<=months);
+  const w=upper.months===lower.months?0:(months-lower.months)/(upper.months-lower.months);
+  const required=lower.remaining*(1-w)+upper.remaining*w;
+  const maximum=lower.maximum*(1-w)+upper.maximum*w;
+  const date=months===maximums.firstMonths?new Date(endpoints[0].date):new Date(maximums.birth.getFullYear(),maximums.birth.getMonth()+months+1,0);
+  const effectiveDate=new Date(date.getFullYear(),date.getMonth()+1,1);
+  candidates.push({months,date,effectiveDate,maximum,required,funded:required<=lastPurchase,balance:lastPurchase-required});
+ }
+ return {endpoints,candidates,financed:candidates.find(c=>c.funded)||null,lastPurchase,previousPurchases};
+}
 function calculateFinancedDate(tables,{birth,purchaseDate,lastPurchase,previousPurchases,salary}){
  if(!(birth instanceof Date)||!(purchaseDate instanceof Date)||!Number.isFinite(birth.getTime())||!Number.isFinite(purchaseDate.getTime())||purchaseDate<=birth)throw Error('Vérifie la naissance et la date du dernier rachat.');
  if(![lastPurchase,previousPurchases,salary].every(Number.isFinite)||lastPurchase<0||previousPurchases<0||salary<=0)throw Error('Les rachats doivent être positifs ou nuls et le salaire assuré strictement positif.');
