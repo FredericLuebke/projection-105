@@ -12,7 +12,7 @@
 <section class="hero"><div><div class="eyebrow">PRÉVOYANCE PROFESSIONNELLE · SUISSE</div><h1>Projection 105%</h1><p>Modélisez l’évolution des avoirs par plan et obtenez une estimation de rente. Les données saisies restent dans votre navigateur.</p></div></section>
 <main class="layout"><section>
 <div class="section-title"><span class="step">01</span><div><h2>Hypothèses de calcul</h2><p>Paramètres communs à tous les plans</p></div><span class="badge">LOCAL & PRIVÉ</span></div>
-<section class="panel"><div class="panel-head"><span class="icon">◷</span><div><h3>Paramètres généraux</h3><p>Date et âge de retraite</p></div></div><div class="fields"><label class="field">Date de naissance<input id="birthDate" type="text" inputmode="numeric" placeholder="jj/mm/aaaa" maxlength="10" value="01/01/1960"></label><label class="field">Date de calcul<input id="calculationDate" type="text" inputmode="numeric" placeholder="jj/mm/aaaa" maxlength="10"></label><label class="field">Âge de retraite réglementaire<input id="retirementAge" type="number" min="58" max="70" step="0.25" value="65.00"></label><label class="field">Nombre de plans<select id="planCount"><option>1</option><option>2</option><option>3</option></select></label></div></section>
+<section class="panel"><div class="panel-head"><span class="icon">◷</span><div><h3>Paramètres généraux</h3><p>Date et âge de retraite</p></div></div><div class="fields"><label class="field">Date de naissance<input id="birthDate" type="text" inputmode="numeric" placeholder="jj.mm.aaaa" maxlength="10" value="01.01.1960"></label><label class="field">Date de calcul<input id="calculationDate" type="text" inputmode="numeric" placeholder="jj.mm.aaaa" maxlength="10"></label><label class="field">Âge de retraite réglementaire<input id="retirementAge" type="number" min="58" max="70" step="0.25" value="65.00"></label><label class="field">Nombre de plans<select id="planCount"><option>1</option><option>2</option><option>3</option></select></label></div></section>
 <section class="panel"><div class="panel-head"><span class="icon">↗</span><div><h3>Taux de conversion</h3><p>Barème commun, de 58 à 70 ans</p></div></div><table class="rate-grid"><thead><tr><th>Âge</th><th>Taux (%)</th></tr></thead><tbody id="conversionRows"></tbody></table><p class="hint">Taux préremplis fictifs : remplace-les par le barème validé de la caisse.</p></section>
 <div class="section-title" style="margin-top:24px"><span class="step">02</span><div><h2>Données par plan</h2><p>Avoirs, salaire et bonifications propres à chaque plan</p></div></div><div id="plans"></div>
 <button id="calculate" class="calc"><span>Calculer la projection</span><span>→</span></button><div id="error" class="error" role="alert"></div>
@@ -21,11 +21,11 @@
 </div>
 <script>
 'use strict';
-const fmt = n => Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-const moneyFmt = n => fmt(n).replace(/,/g,"'");
-const numericValue = value => Number(String(value).replace(/[,'’\s]/g,''));
+const fmt = n => Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}).replace(/,/g,'\u0060');
+const moneyFmt = n => fmt(n);
+const numericValue = value => Number(String(value).replace(/[,\u0060'’\s]/g,''));
 const num = el => { const v=numericValue(el.value); return Number.isFinite(v)?v:0; };
-document.getElementById('calculationDate').value=`01/01/${new Date().getFullYear()}`;
+document.getElementById('calculationDate').value=`01.01.${new Date().getFullYear()}`;
 const initialBrackets = () => [[18,24,7],[25,34,10],[35,44,15],[45,54,18],[55,65,20]];
 const rates = new Map(Array.from({length:13},(_,i)=>[58+i,4.5+i*.1]));
 const conversionRows=document.getElementById('conversionRows');
@@ -43,7 +43,7 @@ document.getElementById('planCount').addEventListener('change',()=>{syncPlans();
 function formatMoneyInputs(){document.querySelectorAll('.with,.without,.salary').forEach(input=>{const value=numericValue(input.value);if(input.value.trim()&&Number.isFinite(value))input.value=moneyFmt(value);});}
 formatMoneyInputs();
 document.getElementById('plans').addEventListener('focusout',event=>{if(event.target.matches('.with,.without,.salary')){const value=numericValue(event.target.value);if(event.target.value.trim()&&Number.isFinite(value))event.target.value=moneyFmt(value);}});
-function parseDate(id){const v=document.getElementById(id).value.trim();const match=/^(\d{2})\/(\d{2})\/(\d{4})$/.exec(v);if(!match)throw Error('Saisis les dates au format jj/mm/aaaa.');const day=Number(match[1]),month=Number(match[2]),year=Number(match[3]);const d=new Date(0);d.setFullYear(year,month-1,day);d.setHours(0,0,0,0);if(year<1||d.getFullYear()!==year||d.getMonth()!==month-1||d.getDate()!==day)throw Error('Vérifie les dates saisies (jj/mm/aaaa).');return d;}
+function parseDate(id){const v=document.getElementById(id).value.trim();const match=/^(\d{2})\.(\d{2})\.(\d{4})$/.exec(v);if(!match)throw Error('Saisis les dates au format jj.mm.aaaa.');const day=Number(match[1]),month=Number(match[2]),year=Number(match[3]);const d=new Date(0);d.setFullYear(year,month-1,day);d.setHours(0,0,0,0);if(year<1||d.getFullYear()!==year||d.getMonth()!==month-1||d.getDate()!==day)throw Error('Vérifie les dates saisies (jj.mm.aaaa).');return d;}
 function dateYearClamped(date,years){const y=date.getFullYear()+years,m=date.getMonth();return new Date(y,m,Math.min(date.getDate(),new Date(y,m+1,0).getDate()));}
 function retirementEnd(birth,age){const whole=Math.floor(age),months=Math.round((age-whole)*12);if(months<0||months>11)throw Error('Fraction d’âge invalide.');const base=dateYearClamped(birth,whole);const y=base.getFullYear()+Math.floor((base.getMonth()+months)/12),m=(base.getMonth()+months)%12;return new Date(y,m+1,0);}
 function bonusFor(rows,age){const hits=rows.filter(b=>age>=b.from&&age<=b.to);if(hits.length!==1)throw Error(`Il faut exactement une bonification pour l’âge LPP ${age}.`);return hits[0].rate;}
