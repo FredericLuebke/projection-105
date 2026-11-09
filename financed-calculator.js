@@ -114,11 +114,15 @@ function buildProjectedPurchaseMaximums({birth,start,initial,salary,interest,bra
   const atStart=months===startMonths&&minimumMonths<=startMonths&&months!==regulatoryMonths;
   const date=atStart?new Date(start):endAt(months);
   const row=projection.find(p=>ageMonths(p.date)===months);
+  if(!atStart&&!row)throw Error('Échéance de retraite hors de la période projetée.');
   const balance=atStart?initial:row.balance,conversion=conversionAt(months);
   const pension=balance*conversion/100,delta=regulatoryPension-pension;
-  const maximum=delta/(conversion/100);
-  if(![pension,delta,maximum].every(Number.isFinite))throw Error('Montant projeté hors limites.');
-  return {months,date,balance,conversion,pension,delta,maximum};
+  const maximumAtRetirement=delta/(conversion/100);
+  // Discount for elapsed months from the valuation month, not calendar LPP age.
+  const discountYears=Math.max(0,(months-startMonths)/12);
+  const maximum=maximumAtRetirement/Math.pow(1+interest/100,discountYears);
+  if(![pension,delta,maximumAtRetirement,maximum].every(Number.isFinite))throw Error('Montant projeté hors limites.');
+  return {months,date,balance,conversion,pension,delta,maximumAtRetirement,discountYears,maximum};
  });
  return {birth,start,initial,salary,interest,projection,endpoints,firstMonths,regulatoryMonths,regulatoryDate:end,regulatoryBalance,regulatoryConversion,regulatoryPension};
 }
@@ -126,6 +130,7 @@ function buildProjectedPurchaseMaximums({birth,start,initial,salary,interest,bra
 function financeProjectedMaximums(maximums,{lastPurchase,previousPurchases}){
  if(![lastPurchase,previousPurchases].every(v=>Number.isFinite(v)&&v>=0))throw Error('Les montants des rachats doivent être positifs ou nuls.');
  const endpoints=maximums.endpoints.map(p=>({...p,remaining:Math.max(0,p.maximum-previousPurchases)}));
+ if(!endpoints.length)throw Error('Aucun maximum rachetable à financer.');
  const candidates=[];
  for(let months=maximums.firstMonths;months<=maximums.regulatoryMonths;months++){
   const upper=endpoints.find(p=>p.months>=months),lower=[...endpoints].reverse().find(p=>p.months<=months);
