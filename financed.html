@@ -57,11 +57,11 @@ input[readonly]{color:#91a0b6;background:#142237}
 </div></section>
 <section class="panel" id="fundingInputs"><h2>Données du financement · un seul plan</h2><div class="fields">
 <label>Date de naissance<input id="fundBirth" type="text" placeholder="jj.mm.aaaa" maxlength="10" value="01.01.1968"></label>
+<label>Salaire assuré à la date du rachat (CHF)<input id="fundSalary" type="text" inputmode="decimal" value="100&#96;000.00"></label>
 <label><span id="fundDateLabel">Date du dernier rachat futur</span><input id="fundDate" type="text" placeholder="jj.mm.aaaa" maxlength="10"></label>
+<label id="initialBalanceField" hidden>Avoir sans rachat au 1er du mois du rachat (CHF)<input id="initialBalance" type="text" inputmode="decimal" value="100&#96;000.00"></label>
 <label>Montant du dernier rachat futur (CHF)<input id="lastPurchase" type="text" inputmode="decimal" value="0.00"></label>
 <label>Total des rachats futurs effectués auparavant (CHF)<input id="previousPurchases" type="text" inputmode="decimal" value="0.00"></label>
-<label>Salaire assuré à la date du rachat (CHF)<input id="fundSalary" type="text" inputmode="decimal" value="100&#96;000.00"></label>
-<label id="initialBalanceField" hidden>Avoir sans rachat au 1er du mois du rachat (CHF)<input id="initialBalance" type="text" inputmode="decimal" value="100&#96;000.00"></label>
 <label id="minimumAgeField" hidden>Premier âge de retraite anticipée possible<input id="minimumAge" type="number" min="58" max="70" step="0.25" value="58"></label>
 </div><p class="note">Les rachats antérieurs correspondent au total avant saisie du dernier rachat (élément spécifique 7 de la photo). Ils ne sont pas ajoutés une seconde fois. Aucun montant ni intérêt historique n’est reconstitué automatiquement.</p></section>
 <div id="tableInputs"><section class="panel"><h2>Bonifications par tranche d’âge</h2><p class="note">Début d’épargne : première tranche saisie. Valeurs préremplies fictives pour tester le brouillon.</p><div class="scroll"><table class="brackets"><thead><tr><th>Âge dès</th><th>Âge jusqu’à</th><th>Bonification annuelle (%)</th><th>Action</th></tr></thead><tbody id="brackets"></tbody></table></div><p><button id="addBracket" type="button">＋ Ajouter une tranche</button></p></section>
