@@ -133,15 +133,30 @@ function renderFundingSummary(financed,displayFunding,funding,effectiveDate){
  if(!financed)return '<div class="panel"><h2>Date de retraite financée</h2><p>Aucune date entièrement financée dans la période recherchée.</p></div>';
  return `<div class="summary"><small>DATE DE RETRAITE FINANCÉE</small><br><strong style="font-size:32px">${dateLabel(financed.displayDate)}</strong><br>Âge au jour précédent : <b>${monthsLabel(displayFunding.ageMonths)}</b></div><div class="result-metric"><span>Première échéance entièrement financée</span><strong>${dateLabel(effectiveDate)}</strong></div><div class="result-metric"><span>Rachat requis à l’échéance financée</span><strong>CHF ${format(displayFunding.required,2)}</strong></div><div class="result-metric"><span>Rachat disponible</span><strong>CHF ${format(funding.lastPurchase,2)}</strong></div><div class="result-metric"><span>Solde après financement à l’échéance</span><strong>CHF ${format(displayFunding.remaining,2)}</strong></div>`;
 }
-function updateFundingPresentation(birth){
+function financingRateForCandidate(candidate,funding,isProjection){
+ if(!isProjection)return funding.salary?candidate.maximum/funding.salary*100:NaN;
+ const upper=funding.endpoints.find(item=>item.months>=candidate.months),lower=[...funding.endpoints].reverse().find(item=>item.months<=candidate.months);
+ if(!upper||!lower)return NaN;
+ const weight=upper.months===lower.months?0:(candidate.months-lower.months)/(upper.months-lower.months);
+ return lower.conversion*(1-weight)+upper.conversion*weight;
+}
+function updateFundingPresentation(birth,funding,isProjection){
  const panels=$('fundingResult').querySelectorAll('.panel'),panel=panels[panels.length-1];
  if(!panel)return;
  const note=panel.querySelector('.note');
  if(note)note.textContent='Le besoin et le solde sont calculés à la première échéance entièrement financée. Seul l’âge affiché est calculé au jour précédent la date de retraite financée.';
  const table=[...panel.querySelectorAll('details table')].find(item=>item.tHead?.rows[0]?.cells[0]?.textContent==='Date de retraite affichée');
- table?.querySelectorAll('tbody tr').forEach(row=>{
-  const date=parseFinancedDate(row.cells[0].textContent.trim());
-  row.cells[2].textContent=monthsLabel(ageMonthsBeforeDisplayedDate(birth,date));
+ if(!table)return;
+ const displayDates=[...table.tBodies[0].rows].map(row=>parseFinancedDate(row.cells[0].textContent.trim()));
+ table.tHead.rows[0].deleteCell(0);
+ [...table.tBodies[0].rows].forEach(row=>row.deleteCell(0));
+ const rateHeader=document.createElement('th');rateHeader.textContent=isProjection?'Taux de conversion utilisé (%)':'Coefficient de rachat utilisé (%)';
+ table.tHead.rows[0].insertBefore(rateHeader,table.tHead.rows[0].cells[2]);
+ [...table.tBodies[0].rows].forEach((row,index)=>{
+  const candidate=funding.candidates[index];
+  row.cells[1].textContent=monthsLabel(ageMonthsBeforeDisplayedDate(birth,displayDates[index]));
+  const rateCell=document.createElement('td');rateCell.textContent=format(financingRateForCandidate(candidate,funding,isProjection),4);
+  row.insertBefore(rateCell,row.cells[2]);
  });
 }
 function renderProjection(input){
@@ -151,7 +166,7 @@ function renderProjection(input){
  const funding=financeProjectedMaximums(maximums,{lastPurchase:number($('lastPurchase').value),previousPurchases:number($('previousPurchases').value)}),f=funding.financed,displayFunding=f?fundingAtFinancedDate(f,maximums.birth):null;
  $('tables').replaceChildren();
  $('fundingResult').innerHTML=`<section class="panel"><h2>1 · Projection de l’avoir et maxima rachetables</h2><p class="note">Avoir initial sans rachat projeté tel quel : CHF ${format(maximums.initial,2)} au ${dateLabel(maximums.start)}. Taux annuel : ${format(maximums.interest,2)} %. Intérêts sur la base du 1er janvier ; bonifications selon l’âge LPP ; mois final intégral.</p>${grid(['Échéance','Âge','Date de valorisation','Avoir (CHF)','Conversion (%)','Rente annuelle (CHF)'],[['Retraite anticipée retenue',monthsLabel(first.months),dateLabel(first.date),format(first.balance,2),format(first.conversion,4),format(first.pension,2)],['Retraite réglementaire',monthsLabel(maximums.regulatoryMonths),dateLabel(maximums.regulatoryDate),format(maximums.regulatoryBalance,2),format(maximums.regulatoryConversion,4),format(maximums.regulatoryPension,2)]])}<div class="summary" style="margin-top:16px">Différence de rente annuelle : <b>CHF ${format(first.delta,2)}</b><br>Maximum rachetable à la première échéance, avant escompte : CHF ${format(first.maximumAtRetirement,2)}<br>Maximum rachetable escompté à la date de l’avoir sans rachat (${dateLabel(maximums.start)}) : <b>CHF ${format(first.maximum,2)}</b><br>Escompte : ${format(first.discountYears,4)} ans au taux de ${format(maximums.interest,2)} %.</div><p class="note">Maximum à l’âge cible = (rente réglementaire − rente anticipée) / (taux anticipé / 100). Ce capital est ensuite escompté au mois de l’avoir sans rachat avec (1 + taux futur)^(nombre de mois entre les dates / 12). Si l’âge minimal est déjà atteint au mois de départ, la première valorisation utilise directement l’avoir initial à cette date. Sinon, valorisation à la fin du mois de l’âge cible.</p><details><summary>Maxima aux âges annuels et aux bornes</summary>${grid(['Âge','Valorisation','Avoir projeté (CHF)','Conversion (%)','Rente annuelle (CHF)','Delta rente (CHF)','Capital cible (CHF)','Durée escompte (ans)','Maximum à la date de l’avoir (CHF)'],maximums.endpoints.map(p=>[monthsLabel(p.months),dateLabel(p.date),format(p.balance,2),format(p.conversion,4),format(p.pension,2),format(p.delta,2),format(p.maximumAtRetirement,2),format(p.discountYears,4),format(p.maximum,2)]))}</details><details><summary>Projection mensuelle de l’avoir</summary>${grid(['Fin de mois','Âge LPP','Intérêts (CHF)','Bonification (CHF)','Avoir (CHF)'],maximums.projection.map(p=>[dateLabel(p.date),p.lppAge,format(p.interest,2),format(p.bonus,2),format(p.balance,2)]))}</details></section><section class="panel"><h2>2 · Date de retraite entièrement financée</h2>${renderFundingSummary(f,displayFunding,funding,f?.effectiveDate)}${f?`<p class="note">Valorisation de l’avoir : ${dateLabel(f.date)}. Les rachats antérieurs (CHF ${format(funding.previousPurchases,2)}) sont déduits du besoin à l’âge affiché.</p>`:''}<details><summary>Détail du financement mensuel</summary>${grid(['Date de retraite affichée','Échéance financée','Âge','Maximum escompté à la date de l’avoir (CHF)','Besoin restant (CHF)','Dernier rachat (CHF)','Financé'],funding.candidates.map(c=>[dateLabel(c.displayDate),dateLabel(c.effectiveDate),monthsLabel((c.displayDate.getFullYear()-maximums.birth.getFullYear())*12+c.displayDate.getMonth()-maximums.birth.getMonth()),format(c.maximum,2),format(c.required,2),format(funding.lastPurchase,2),c===f?'Oui — date retenue':c.funded?'Oui':'Non']))}</details></section>`;
- updateFundingPresentation(maximums.birth);
+ updateFundingPresentation(maximums.birth,funding,true);
  $('stale').hidden=true;
 }
 $('financedForm').onsubmit=event=>{
@@ -167,7 +182,7 @@ $('financedForm').onsubmit=event=>{
  <section class="panel"><details open><summary>Tabelle de rachat du passé</summary><p class="note">Avoir théorique au début de l’année d’âge, avant la bonification de cette année. Arrondi Excel à trois décimales du coefficient après intérêts, puis ajout de la bonification précédente. Pour 1e : minimum entre l’avoir théorique et 25 % par année d’épargne à bonification non nulle.</p>${grid(['Âge','Bonification (%)','Coefficient théorique (%)','Plafond 1e (%)','Coefficient retenu (%)'],result.past.map(p=>[p.age,p.bonus===null?'—':format(p.bonus*100,2),format(p.raw*100),input.type==='1e'?format(p.cap*100):'Non applicable',format(p.coefficient*100)]))}</details></section>
  <section class="panel"><details open><summary>Tabelle de rachat du futur</summary><p class="note">Lignes : âge au rachat. Colonnes : âge de retraite visé. Capital compensant l’écart entre les buts de rente, arrondi à trois décimales du coefficient à l’âge cible, puis escompté à ${format(input.futureInterest,2)} % par an. Comme dans le nouveau classeur : zéro après la retraite visée ; propagation arrière interrompue par une année à bonification nulle. Aucun minimum à zéro n’est imposé au capital brut.</p>${grid(['Âge au rachat',...result.targets.map(a=>`Retraite ${ageLabel(a)} ans (%)`)],result.future.map(p=>[p.age,...p.coefficients.map(c=>format(c*100))]))}</details></section>
  <section class="panel"><details><summary>Contrôle des buts de rente et du capital à financer</summary>${grid(['Âge de retraite','Taux de conversion (%)','But de rente (% salaire)','Capital à financer (% salaire)'],result.costs.map(c=>[ageLabel(c.age),format(c.conversion*100,4),format(c.pension*100),format(c.capital*100)]))}</details><p class="note">Convention validée pour un âge fractionnaire : interpolation linéaire des coefficients passés retenus et des taux de conversion. L’escompte sur une fraction d’année utilise (1 + taux)<sup>durée</sup>. Les références de cellules décalées du classeur ne sont pas reproduites : chaque but de rente utilise le coefficient du même âge. Barèmes fictifs ; brouillon à valider avant tout usage réel.</p></section>`;
- updateFundingPresentation(parseFinancedDate($('fundBirth').value));
+ updateFundingPresentation(parseFinancedDate($('fundBirth').value),funding,false);
  $('stale').hidden=true;$('tables').hidden=false;
  $('tables').querySelector('.note').textContent='Tous les coefficients sont exprimés en % du salaire assuré. Exemple : un coefficient de 150 % correspond à 1.5 × le salaire. Le calcul du financement est affiché au-dessus.';
  }catch(error){$('fundingResult').replaceChildren();$('tables').replaceChildren();$('stale').hidden=true;$('error').textContent=error.message;}
