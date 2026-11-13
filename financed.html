@@ -147,14 +147,14 @@ function updateFundingPresentation(birth,funding,isProjection){
  if(note)note.textContent='Le besoin et le solde sont calculés à la première échéance entièrement financée. Seul l’âge affiché est calculé au jour précédent la date de retraite financée.';
  const table=[...panel.querySelectorAll('details table')].find(item=>item.tHead?.rows[0]?.cells[0]?.textContent==='Date de retraite affichée');
  if(!table)return;
- const displayDates=[...table.tBodies[0].rows].map(row=>parseFinancedDate(row.cells[0].textContent.trim()));
+ const financedDates=[...table.tBodies[0].rows].map(row=>parseFinancedDate(row.cells[1].textContent.trim()));
  table.tHead.rows[0].deleteCell(0);
  [...table.tBodies[0].rows].forEach(row=>row.deleteCell(0));
  const rateHeader=document.createElement('th');rateHeader.textContent=isProjection?'Taux de conversion utilisé (%)':'Coefficient de rachat utilisé (%)';
  table.tHead.rows[0].insertBefore(rateHeader,table.tHead.rows[0].cells[2]);
  [...table.tBodies[0].rows].forEach((row,index)=>{
   const candidate=funding.candidates[index];
-  row.cells[1].textContent=monthsLabel(ageMonthsBeforeDisplayedDate(birth,displayDates[index]));
+    row.cells[1].textContent=monthsLabel(ageMonthsBeforeDisplayedDate(birth,financedDates[index]));
   const rateCell=document.createElement('td');rateCell.textContent=format(financingRateForCandidate(candidate,funding,isProjection),4);
   row.insertBefore(rateCell,row.cells[2]);
  });
