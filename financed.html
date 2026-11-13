@@ -75,7 +75,7 @@ input[readonly]{color:#91a0b6;background:#142237}
 <p id="scenarioNote" class="muted" hidden>Projection de l’avoir saisi tel quel, sans ajouter ni retrancher les rachats. Le taux des rachats du futur sert de taux annuel de projection. Intérêts et bonifications selon la même convention mensuelle que le 105 %, sans appliquer de limite de 105 %.</p>
 <button id="buildTables" type="submit" class="primary">Construire les tabelles et calculer la date financée</button><p id="error" class="error" role="alert"></p><p id="stale" class="stale" hidden>Données modifiées : relance le calcul pour actualiser les résultats.</p>
 </form><aside id="fundingResult" aria-live="polite"></aside></div><div id="tables" aria-live="polite"></div>
-<script src="financed-calculator.js?v=9"></script><script>
+<script src="financed-calculator.js?v=10"></script><script>
 'use strict';
 const $=id=>document.getElementById(id);
 const number=value=>value.trim()===''?NaN:Number(value.replace(/[\u0060'’\s]/g,''));
