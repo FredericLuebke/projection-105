@@ -139,15 +139,20 @@ function financeProjectedMaximums(maximums,{lastPurchase,previousPurchases}){
   const maximum=lower.maximum*(1-w)+upper.maximum*w;
   const date=months===maximums.firstMonths?new Date(endpoints[0].date):new Date(maximums.birth.getFullYear(),maximums.birth.getMonth()+months+1,0);
   const effectiveDate=new Date(date.getFullYear(),date.getMonth()+1,1);
-  candidates.push({months,date,effectiveDate,maximum,required,funded:required<=lastPurchase,balance:lastPurchase-required});
+  const previousMonth=new Date(effectiveDate.getFullYear(),effectiveDate.getMonth()-1,1);
+  const minimumDate=new Date(maximums.birth.getFullYear(),maximums.birth.getMonth()+maximums.firstMonths,1);
+  const displayDate=previousMonth<minimumDate?minimumDate:previousMonth;
+  candidates.push({months,date,effectiveDate,displayDate,maximum,required,funded:required<=lastPurchase,balance:lastPurchase-required});
  }
  return {endpoints,candidates,financed:candidates.find(c=>c.funded)||null,lastPurchase,previousPurchases};
 }
-function calculateFinancedDate(tables,{birth,purchaseDate,lastPurchase,previousPurchases,salary}){
+function calculateFinancedDate(tables,{birth,purchaseDate,lastPurchase,previousPurchases,salary,minimumAge=58}){
  if(!(birth instanceof Date)||!(purchaseDate instanceof Date)||!Number.isFinite(birth.getTime())||!Number.isFinite(purchaseDate.getTime())||purchaseDate<=birth)throw Error('Vérifie la naissance et la date du dernier rachat.');
  if(![lastPurchase,previousPurchases,salary].every(Number.isFinite)||lastPurchase<0||previousPurchases<0||salary<=0)throw Error('Les rachats doivent être positifs ou nuls et le salaire assuré strictement positif.');
  const retirementMonths=Math.round(tables.input.retirementAge*12);
  if(Math.abs(retirementMonths-tables.input.retirementAge*12)>1e-8)throw Error('L’âge réglementaire doit correspondre à un nombre entier de mois.');
+ const minimumMonths=Math.round(minimumAge*12);
+ if(!Number.isFinite(minimumAge)||minimumAge<58||minimumAge>tables.input.retirementAge||Math.abs(minimumMonths-minimumAge*12)>1e-8)throw Error('L’âge anticipé doit être compris entre 58 ans et l’âge réglementaire, par mois entier.');
  // Excel uses Jan 1 of the birth year, and the first day of the purchase month.
  const purchaseAge=purchaseDate.getFullYear()-birth.getFullYear()+purchaseDate.getMonth()/12;
  const low=Math.floor(purchaseAge),fraction=purchaseAge-low;
@@ -160,9 +165,10 @@ function calculateFinancedDate(tables,{birth,purchaseDate,lastPurchase,previousP
  });
  const firstDate=months=>new Date(birth.getFullYear(),birth.getMonth()+months+1,1);
  const regulatoryDate=firstDate(retirementMonths);
+ const minimumDate=new Date(birth.getFullYear(),birth.getMonth()+minimumMonths,1);
  if(purchaseDate>regulatoryDate)throw Error('Le dernier rachat est postérieur à la date de retraite réglementaire.');
  const candidates=[];
- for(let months=58*12;months<=retirementMonths;months++){
+ for(let months=minimumMonths;months<=retirementMonths;months++){
   const date=firstDate(months);if(date<purchaseDate)continue;
   const upper=endpoints.find(p=>p.months>=months),lower=[...endpoints].reverse().find(p=>p.months<=months);
   if(!upper||!lower)throw Error('Interpolation hors de la tabelle.');
@@ -171,7 +177,9 @@ function calculateFinancedDate(tables,{birth,purchaseDate,lastPurchase,previousP
   const required=lower.remaining*(1-weight)+upper.remaining*weight;
   const maximum=lower.maximum*(1-weight)+upper.maximum*weight;
   const funded=required<=lastPurchase;
-  candidates.push({date,months,required,maximum,funded,balance:lastPurchase-required});
+  const previousMonth=new Date(date.getFullYear(),date.getMonth()-1,1);
+  const displayDate=previousMonth<minimumDate?minimumDate:previousMonth;
+  candidates.push({date,displayDate,months,required,maximum,funded,balance:lastPurchase-required});
  }
  const financed=candidates.find(c=>c.funded)||null;
  return {financed,candidates,endpoints,purchaseAge,regulatoryDate,totalPurchases:lastPurchase+previousPurchases,lastPurchase,previousPurchases,salary};
