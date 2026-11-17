@@ -37,6 +37,7 @@ input[readonly]{color:#91a0b6;background:#142237}
 .rates td:first-child{width:90px;color:#cbd8e8}
 .rates input{height:25px;padding:0 7px;font-size:12px}
 #addBracket{font-size:12px;padding:8px 10px;background:#142a40;color:#aee4ff;border-color:#35617d}
+.pdf-button{margin-top:12px;background:#bbf7d0;color:#14532d;border-color:#86efac}
 .primary{padding:14px 18px;border-color:#76c9ee;border-radius:10px;background:linear-gradient(100deg,#8bd5f7,#61b6df);font:700 14px 'Segoe UI',sans-serif}
 .primary:disabled{opacity:.5;cursor:not-allowed}
 #tables{margin-top:27px}
@@ -76,8 +77,9 @@ input[readonly]{color:#91a0b6;background:#142237}
 <section class="panel"><h2>Taux de conversion</h2><p id="rateSource" class="note">Base : valeurs fictives à remplacer par le barème validé.</p><p class="note">Taux modifiables. Changer de sexe ou d’année charge le barème correspondant. Pour 2026, les taux après 65 ans ne sont pas fournis : ils doivent être saisis si nécessaires.</p><table class="rates"><thead><tr><th>Âge</th><th>Taux (%)</th></tr></thead><tbody id="rates"></tbody></table></section></div>
 <p id="scenarioNote" class="muted" hidden>Seul l’avoir sans rachats futurs est projeté. Le premier taux s’applique jusqu’au 31 décembre de l’année de départ; le second dès le 1er janvier suivant. Pour un départ en cours de mois, les intérêts sont proratisés selon les jours restants (jour de départ inclus). La bonification du mois est créditée à la fin de celui-ci.</p>
 <button id="buildTables" type="submit" class="primary">Construire les tabelles et calculer la date financée</button><p><button id="clearSavedInputs" type="button">Effacer les saisies mémorisées</button></p><p id="error" class="error" role="alert"></p><p id="stale" class="stale" hidden>Données modifiées : relance le calcul pour actualiser les résultats.</p>
+<button id="saveFinancedPdf" type="button" class="primary pdf-button" hidden disabled>Enregistrer en PDF</button>
 </form><aside id="fundingResult" aria-live="polite"></aside></div><div id="tables" aria-live="polite"></div>
-<script src="financed-calculator.js?v=11"></script><script>
+<script src="jspdf.umd.min.js"></script><script src="jspdf.plugin.autotable.min.js"></script><script src="financed-calculator.js?v=11"></script><script>
 'use strict';
 const $=id=>document.getElementById(id);
 const number=value=>value.trim()===''?NaN:Number(value.replace(/[\u0060'’\s]/g,''));
@@ -160,7 +162,8 @@ function restoreFinancedInputs(){
  loadPlanRates();$('scenario').onchange();$('stale').hidden=true;
 }
 $('regAge').addEventListener('input',renderRates);renderRates();
-$('financedForm').addEventListener('input',()=>{markStale();saveFinancedInputs();});$('financedForm').addEventListener('change',()=>{markStale();saveFinancedInputs();});
+function setFinancedPdfAvailable(available){$('saveFinancedPdf').hidden=!available;$('saveFinancedPdf').disabled=!available;}
+$('financedForm').addEventListener('input',()=>{markStale();saveFinancedInputs();setFinancedPdfAvailable(false);});$('financedForm').addEventListener('change',()=>{markStale();saveFinancedInputs();setFinancedPdfAvailable(false);});
 $('clearSavedInputs').onclick=()=>{try{localStorage.removeItem(FINANCED_INPUTS_KEY);}catch(error){}location.reload();};
 $('scenario').onchange=()=>{
  const projection=$('scenario').value==='projection';
@@ -170,7 +173,7 @@ $('scenario').onchange=()=>{
  $('fundDateLabel').textContent='Date du dernier rachat';
  updateProjectionRateLabels();
  $('buildTables').textContent=projection?'Projeter l’avoir, puis calculer la date financée':'Construire les tabelles et calculer la date financée';
- $('fundingResult').replaceChildren();$('tables').replaceChildren();$('error').textContent='';$('stale').hidden=true;
+ $('fundingResult').replaceChildren();$('tables').replaceChildren();$('error').textContent='';$('stale').hidden=true;setFinancedPdfAvailable(false);
 };
 function updateProjectionRateLabels(){
  const match=/^\d{2}\.\d{2}\.(\d{4})$/.exec($('fundDate').value.trim());
@@ -246,7 +249,7 @@ $('financedForm').onsubmit=event=>{
  event.preventDefault();$('error').textContent='';
  try{
  const input={type:$('planType').value,retirementAge:number($('regAge').value),pastInterest:number($('pastRate').value),futureInterest:number($('futureRate').value),currentYearInterest:number($('projectionCurrentRate').value),nextYearInterest:number($('projectionNextRate').value),brackets:[...$('brackets').rows].map(tr=>({from:number(tr.querySelector('.from').value),to:number(tr.querySelector('.to').value),rate:number(tr.querySelector('.bonus').value)})),rates:Object.fromEntries([...rates].map(([a,r])=>[a,number(r)]))};
- if($('scenario').value==='projection'){renderProjection(input);return;}
+ if($('scenario').value==='projection'){renderProjection(input);setFinancedPdfAvailable(true);return;}
  const result=buildPurchaseTables(input);
  const funding=calculateFinancedDate(result,{birth:parseFinancedDate($('fundBirth').value),purchaseDate:parseFinancedDate($('fundDate').value),lastPurchase:number($('lastPurchase').value),previousPurchases:number($('previousPurchases').value),salary:number($('fundSalary').value),minimumAge:number($('minimumAge').value)});
  const financed=funding.retainedCandidate,retainedDate=retirementDateForCandidate(financed),displayFunding=financed?fundingAtFinancedDate(financed,parseFinancedDate($('fundBirth').value),retainedDate,funding.lastPurchase,!funding.lastUnfunded):null;
@@ -256,9 +259,9 @@ $('financedForm').onsubmit=event=>{
  <section class="panel"><details open><summary>Tabelle de rachat du futur</summary><p class="note">Lignes : âge au rachat. Colonnes : âge de retraite visé. Capital compensant l’écart entre les buts de rente, arrondi à trois décimales du coefficient à l’âge cible, puis escompté à ${format(input.futureInterest,2)} % par an. Comme dans le nouveau classeur : zéro après la retraite visée ; propagation arrière interrompue par une année à bonification nulle. Aucun minimum à zéro n’est imposé au capital brut.</p>${grid(['Âge au rachat',...result.targets.map(a=>`Retraite ${ageLabel(a)} ans (%)`)],result.future.map(p=>[p.age,...p.coefficients.map(c=>format(c*100))]))}</details></section>
  <section class="panel"><details><summary>Contrôle des buts de rente et du capital à financer</summary>${grid(['Âge de retraite','Taux de conversion (%)','But de rente (% salaire)','Capital à financer (% salaire)'],result.costs.map(c=>[ageLabel(c.age),format(c.conversion*100,4),format(c.pension*100),format(c.capital*100)]))}</details><p class="note">Convention validée pour un âge fractionnaire : interpolation linéaire des coefficients passés retenus et des taux de conversion. L’escompte sur une fraction d’année utilise (1 + taux)<sup>durée</sup>. Les références de cellules décalées du classeur ne sont pas reproduites : chaque but de rente utilise le coefficient du même âge. Barèmes fictifs ; brouillon à valider avant tout usage réel.</p></section>`;
  updateFundingPresentation(parseFinancedDate($('fundBirth').value),funding,false);
- $('stale').hidden=true;$('tables').hidden=false;
+ $('stale').hidden=true;$('tables').hidden=false;setFinancedPdfAvailable(true);
  $('tables').querySelector('.note').textContent='Tous les coefficients sont exprimés en % du salaire assuré. Exemple : un coefficient de 150 % correspond à 1.5 × le salaire. Le calcul du financement est affiché au-dessus.';
- }catch(error){$('fundingResult').replaceChildren();$('tables').replaceChildren();$('stale').hidden=true;$('error').textContent=error.message;}
+ }catch(error){$('fundingResult').replaceChildren();$('tables').replaceChildren();$('stale').hidden=true;$('error').textContent=error.message;setFinancedPdfAvailable(false);}
 };
 restoreFinancedInputs();updateProjectionRateLabels();
-</script></body></html>
+</script><script src="financed-pdf-export.js?v=1"></script></body></html>
