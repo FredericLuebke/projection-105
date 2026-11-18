@@ -40,9 +40,9 @@ function buildPurchaseTables(input){
  const targets=[];for(let age=58;age<retirementAge;age++)targets.push(age);targets.push(retirementAge);
  const costs=targets.map(age=>({age,conversion:rateAt(age),pension:pastAt(age)*rateAt(age),capital:round3((targetPension-pastAt(age)*rateAt(age))/rateAt(age))}));
  // At target retirement age: rounded capital to compensate the pension difference.
- // Before that age: annual compound discount. Beyond target: not applicable.
+ // Before that age: annual compound discount. Beyond target: use the row's diagonal.
  const future=past.map(row=>({age:row.age,coefficients:costs.map(c=>{
-  if(row.age>c.age)return 0;
+  if(row.age>c.age)return costs.find(target=>target.age===row.age)?.capital??0;
   // Excel propagates backwards only while the current year's savings rate is nonzero.
   for(let age=row.age;age<c.age;age++)if(bonus(age)===0)return 0;
   return c.capital/Math.pow(1+futureInterest/100,c.age-row.age);
