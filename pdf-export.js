@@ -60,11 +60,12 @@ function projectionPdf(output,refs,created=new Date()){
   ['Montant limite annuel : 105% (CHF)',money(output.limit)]
  ]);
  if(y>230){doc.addPage();y=27;}
+ const alreadyExceeded=!!output.firstExceeded&&!output.lastSafe;
  doc.setFillColor(220,252,231);doc.roundedRect(margin,y,182,32,3,3,'F');
  doc.setFont('helvetica','bold');doc.setTextColor(...green);doc.setFontSize(11);
- doc.text('Dernière fin de mois sans dépassement',margin+5,y+9);
+ doc.text(alreadyExceeded?'La limite est déjà dépassée':'Dernière fin de mois sans dépassement',margin+5,y+9);
  doc.setFontSize(output.lastSafe?22:10);
- doc.text(output.lastSafe?dateFmt(output.lastSafe.date):'Aucune date admissible dans la période.',margin+5,y+23);y+=40;
+ doc.text(alreadyExceeded?'Au premier mois évalué.':output.lastSafe?dateFmt(output.lastSafe.date):'Aucune date admissible dans la période.',margin+5,y+23);y+=40;
  if(output.lastSafe)text(`Rente annuelle avec rachat à cette date : CHF ${money(output.lastSafe.pension)}`);
  text(output.firstExceeded?(output.lastSafe?'Dernière échéance mensuelle respectant la limite de 105%.':'La limite est déjà dépassée au premier mois évalué.'):'Aucun dépassement jusqu’à la retraite réglementaire.');
  text(`Comparaison à partir du ${dateFmt(output.searchStart)}. Aucune rente anticipée extrapolée avant 58 ans. Une égalité au seuil est autorisée. Les comparaisons utilisent les montants non arrondis.`,9);
@@ -82,7 +83,9 @@ function projectionPdf(output,refs,created=new Date()){
   heading(`Données saisies - ${p.name}`);
   table(['Paramètre','Valeur'],[
    ['Avoir initial sans rachat (CHF)',money(p.balance)],['Avoir initial avec rachat (CHF)',money(p.withBalance)],
-   ['Salaire retraite annuel (CHF)',money(p.salary)],['Taux d’intérêt annuel (%)',money(p.interest)],
+   ['Salaire retraite annuel (CHF)',money(p.salary)],
+   [`Taux jusqu’au 31.12.${output.calcDate.getFullYear()} (%)`,money(p.interest)],
+   [`Taux dès le 01.01.${output.calcDate.getFullYear()+1} (%)`,money(p.nextInterest)],
    ['Avoir sans rachat à la retraite (CHF)',money(result.balance)],['Rente annuelle sans rachat à la retraite (CHF)',money(result.pension)],
    ['Avoir avec rachat à la retraite (CHF)',money(result.withPurchase.at(-1).balance)]
   ]);
