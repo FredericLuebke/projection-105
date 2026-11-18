@@ -28,6 +28,16 @@ function financedPdfReference(value){
  return text;
 }
 function financedPdfText(value){return String(value).replace(/[’‘]/g,"'").replace(/œ/g,'oe').replace(/Œ/g,'OE').replace(/[–—]/g,'-').replace(/\u202f/g,' ').replace(/\u2264/g,'<=');}
+function financedPdfElementText(element){
+ let text='';
+ const append=node=>{
+  if(node.nodeType===Node.TEXT_NODE){text+=node.nodeValue;return;}
+  if(node.nodeName==='BR'){text+='\n';return;}
+  for(const child of node.childNodes)append(child);
+ };
+ append(element);
+ return text.replace(/[ \t]*\n[ \t]*/g,'\n').trim();
+}
 function financedPdfSafeName(value){return value.normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,60)||'reference';}
 function financedPdfDate(date){return `${String(date.getDate()).padStart(2,'0')}.${String(date.getMonth()+1).padStart(2,'0')}.${date.getFullYear()}`;}
 function financedPdfValue(id){const element=document.getElementById(id);return element?.value??'';}
@@ -84,39 +94,70 @@ function financedPdfDocument(refs,created){
   doc.setFont('helvetica','bold');doc.setFontSize(15);doc.setTextColor(...green);
   doc.text(financedPdfText(title),margin,y);y+=9;
  };
+ const addWarning=(title,value)=>{
+  doc.setFont('helvetica','bold');doc.setFontSize(15);doc.setTextColor(...green);
+  doc.text(financedPdfText(title),margin,y);y+=9;
+  doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(190,35,35);
+  const lines=doc.splitTextToSize(financedPdfText(value),doc.internal.pageSize.getWidth()-margin*2);
+  for(const line of lines){doc.text(line,margin,y);y+=9*.45+1;}
+  y+=2;
+ };
  const addTable=(headers,rows,landscape=headers.length>5)=>{
   doc.autoTable({startY:y,head:[headers.map(financedPdfText)],body:rows.map(row=>row.map(value=>financedPdfText(value??''))),margin:{top:22,bottom:18,left:margin,right:margin},styles:{font:'helvetica',fontSize:8,cellPadding:2,overflow:'linebreak',textColor:[25,40,50]},headStyles:{fillColor:green,textColor:255},alternateRowStyles:{fillColor:[242,248,245]},rowPageBreak:'avoid',showHead:'everyPage'});
   y=doc.lastAutoTable.finalY+8;
  };
+ const addFundingHighlight=panel=>{
+  const summary=panel?.querySelector(':scope > .summary');
+  const label=summary?.querySelector('small')?.textContent.trim()||'DATE DE RETRAITE FINANCÉE';
+  const date=summary?.querySelector('strong')?.textContent.trim()||'Aucune date admissible';
+  const age=summary?.querySelector('b')?.textContent.trim()||'';
+  const labelLines=doc.splitTextToSize(financedPdfText(label),168),boxHeight=22+labelLines.length*4+(age?8:0);
+  if(y+boxHeight>doc.internal.pageSize.getHeight()-20){doc.addPage('a4','portrait');y=25;}
+  doc.setFillColor(220,252,231);doc.setDrawColor(134,239,172);doc.roundedRect(margin,y,182,boxHeight,3,3,'FD');
+  doc.setFont('helvetica','bold');doc.setTextColor(...green);doc.setFontSize(8);doc.text(labelLines,margin+5,y+7);
+    const dateY=y+13+labelLines.length*4;doc.setFontSize(22);doc.text(financedPdfText(date),margin+5,dateY);
+    if(age){doc.setFontSize(9);doc.text(financedPdfText(`Âge : ${age}`),margin+5,dateY+8);}
+  y+=boxHeight+7;
+ };
  const projection=financedPdfValue('scenario')==='projection';
+ const resultPanels=[...document.querySelectorAll('#fundingResult > .panel')],fundingPanel=resultPanels.at(-1);
  doc.setProperties({title:'Date de retraite financée - calcul de prévoyance',subject:`Oeuvre ${refs.oeuvre} - Personne ${refs.personne}`,creator:'Projection 105% - export retraite financée v1'});
  doc.setFont('helvetica','bold');doc.setFontSize(21);doc.setTextColor(...green);doc.text('Date de retraite financée',margin,y);y+=11;
  addText(`N° d’œuvre : ${refs.oeuvre}\nN° de personne : ${refs.personne}`);
  addText(`Enregistré le ${financedPdfDate(created)} à ${created.toLocaleTimeString('fr-CH')} (heure locale).\nMéthode : ${projection?'projection de l’avoir':'tabelle de rachat'}.`);
+ addFundingHighlight(fundingPanel);
+ const retainedMetrics=[...(fundingPanel?.querySelectorAll(':scope > .result-metric')||[])].map(row=>[
+  row.querySelector('span')?.textContent.trim()||'',
+  row.querySelector('strong')?.textContent.trim()||''
+ ]);
+ if(retainedMetrics.length)addTable(['Résultat retenu','Valeur'],retainedMetrics,false);
+ const fundingNote=fundingPanel?.querySelector(':scope > .note');
+ if(fundingNote)addText(fundingNote.textContent.trim(),8);
+ y+=4;
+ addWarning('Avertissement','Projection indicative, non contractuelle. Les résultats dépendent des taux, bonifications et hypothèses saisis; vérifier les valeurs avec les documents de la caisse. Ce document ne constitue pas un décompte officiel ni un conseil financier.');
+ addHeading('Hypothèses saisies');
  addTable(['Données saisies','Valeur'],financedPdfInputs());
- for(const panel of document.querySelectorAll('#fundingResult > .panel')){
+ for(const panel of resultPanels){
   const title=panel.querySelector('h2')?.textContent.trim();
-  if(title)addHeading(title);
-  const summary=panel.querySelector(':scope > .summary');
-  if(summary)addText(summary.innerText.trim());
-  const metrics=[...panel.querySelectorAll(':scope > .result-metric')].map(row=>[
-   row.querySelector('span')?.textContent.trim()||'',
-   row.querySelector('strong')?.textContent.trim()||''
-  ]);
-  if(metrics.length)addTable(['Résultat','Valeur'],metrics,false);
-  for(const note of panel.querySelectorAll(':scope > .note'))addText(note.innerText.trim(),8);
+  if(title&&panel!==fundingPanel)addHeading(title);
+  if(panel!==fundingPanel){
+   const summary=panel.querySelector(':scope > .summary');
+   if(summary)addText(financedPdfElementText(summary));
+   for(const note of panel.querySelectorAll(':scope > .note'))addText(financedPdfElementText(note),8);
+  }else{
+    for(const note of panel.querySelectorAll(':scope > .note'))if(note!==fundingNote)addText(financedPdfElementText(note),8);
+  }
  }
  const outputTables=[...document.querySelectorAll('#fundingResult table, #tables table')];
  for(const [index,table] of outputTables.entries()){
-  const headers=[...table.querySelectorAll('thead th')].map(cell=>cell.innerText.trim());
-  const rows=[...table.querySelectorAll('tbody tr')].map(row=>[...row.cells].map(cell=>cell.innerText.trim()));
+  const clean=value=>String(value).replace(/\s+/g,' ').trim();
+  const headers=[...table.querySelectorAll('thead th')].map(cell=>clean(cell.textContent));
+  const rows=[...table.querySelectorAll('tbody tr')].map(row=>[...row.cells].map(cell=>clean(cell.textContent)));
   if(!headers.length||!rows.length)continue;
-  const title=table.closest('details')?.querySelector('summary')?.innerText.trim()||table.closest('.panel')?.querySelector('h2')?.textContent.trim()||`Tableau ${index+1}`;
+  const title=table.closest('details')?.querySelector('summary')?.textContent.trim()||table.closest('.panel')?.querySelector('h2')?.textContent.trim()||`Tableau ${index+1}`;
   addHeading(title,headers.length>5);
   addTable(headers,rows,headers.length>5);
  }
- addHeading('Avertissement');
- addText('Projection indicative, non contractuelle. Les résultats dépendent des taux, bonifications et hypothèses saisis; vérifier les valeurs avec les documents de la caisse. Ce document ne constitue pas un décompte officiel ni un conseil financier.',9);
  const pages=doc.getNumberOfPages();
  for(let page=1;page<=pages;page++){
   doc.setPage(page);doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(70,90,80);
