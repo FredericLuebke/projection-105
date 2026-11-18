@@ -109,22 +109,22 @@ function buildProjectedPurchaseMaximums({birth,start,initial,salary,currentYearI
  const projection=projectFinancedAssets({birth,start,end,initial,salary,currentYearInterest,nextYearInterest,brackets});
  const regulatoryBalance=projection.at(-1).balance,regulatoryConversion=conversionAt(regulatoryMonths);
  const regulatoryPension=regulatoryBalance*regulatoryConversion/100;
- const startMonths=ageMonths(start),firstMonths=Math.max(minimumMonths,startMonths);
+ const startMonths=ageMonths(start);
+ const usePreviousMonth=start>endAt(minimumMonths)&&startMonths<regulatoryMonths;
+ const firstMonths=usePreviousMonth?startMonths-1:Math.max(minimumMonths,startMonths);
  const targetMonths=[firstMonths];
  for(let m=(Math.floor(firstMonths/12)+1)*12;m<regulatoryMonths;m+=12)targetMonths.push(m);
  if(firstMonths!==regulatoryMonths)targetMonths.push(regulatoryMonths);
  const endpoints=targetMonths.map(months=>{
-  // When the minimum date is already reached, use the actual opening balance,
-  // not a balance with an extra month's accrual at the purchase date.
-  const atStart=months===startMonths&&minimumMonths<=startMonths&&months!==regulatoryMonths;
-  const date=atStart?new Date(start):endAt(months);
+  const atStart=usePreviousMonth&&months===firstMonths;
+  const date=endAt(months);
   const row=projection.find(p=>ageMonths(p.date)===months);
   if(!atStart&&!row)throw Error('Échéance de retraite hors de la période projetée.');
   const balance=atStart?initial:row.balance,conversion=conversionAt(months);
   const pension=balance*conversion/100,delta=regulatoryPension-pension;
   const maximumAtRetirement=delta/(conversion/100);
   // Discount for elapsed months from the valuation month, not calendar LPP age.
-  const discountMonths=Math.max(0,months-startMonths+(atStart?0:1));
+  const discountMonths=atStart?0:Math.max(0,months-startMonths+1);
   const discountYears=discountMonths/12;
   const discountFactor=Math.pow(1+nextYearInterest/100,discountYears);
   const maximum=maximumAtRetirement/discountFactor;
