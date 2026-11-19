@@ -41,22 +41,24 @@ function financedPdfElementText(element){
 function financedPdfSafeName(value){return value.normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,60)||'reference';}
 function financedPdfDate(date){return `${String(date.getDate()).padStart(2,'0')}.${String(date.getMonth()+1).padStart(2,'0')}.${date.getFullYear()}`;}
 function financedPdfValue(id){const element=document.getElementById(id);return element?.value??'';}
+function financedPdfMethod(){return financedPdfValue('scenario')==='external'?'Tabelle de rachat (externe)':financedPdfValue('scenario')==='projection'?'Projection de l’avoir':'Tabelle de rachat FCT';}
 function financedPdfInputs(){
- const projection=financedPdfValue('scenario')==='projection';
+ const projection=financedPdfValue('scenario')==='projection',external=financedPdfValue('scenario')==='external';
  const rows=[
-  ['Méthode de calcul',projection?'Projection de l’avoir':'Tabelle de rachat'],
-  ['Type de plan',financedPdfValue('planType')],
+  ['Méthode de calcul',financedPdfMethod()],
+  ...external?[]:[['Type de plan',financedPdfValue('planType')]],
   ['Sexe',financedPdfValue('sex')],
-  ['Année du plan 1e',financedPdfValue('year')],
+  ...external?[]:[['Année du plan 1e',financedPdfValue('year')]],
   ['Date de naissance',financedPdfValue('fundBirth')],
   ['Date du dernier rachat',financedPdfValue('fundDate')],
   ['Âge de retraite réglementaire',financedPdfValue('regAge')],
   ['Âge minimal de retraite anticipée',financedPdfValue('minimumAge')],
   ['Salaire assuré (CHF)',financedPdfValue('fundSalary')],
-  ['Avoir sans rachats futurs (CHF)',projection?financedPdfValue('initialBalance'):'Non utilisé en mode tabelle'],
+  ...external?[]:[['Avoir sans rachats futurs (CHF)',projection?financedPdfValue('initialBalance'):'Non utilisé en mode tabelle']],
   ['Rachat effectué (CHF)',financedPdfValue('lastPurchase')],
   ['Rachats antérieurs (CHF)',financedPdfValue('previousPurchases')]
  ];
+ if(external){rows.push(['Source des coefficients','Tabelle Excel externe, coefficients en % du salaire, sans nouvel escompte.']);return rows;}
  if(projection){
   rows.push(['Taux de projection jusqu’à la fin de l’année (%)',financedPdfValue('projectionCurrentRate')]);
   rows.push(['Taux de projection dès l’année suivante (%)',financedPdfValue('projectionNextRate')]);
@@ -119,12 +121,11 @@ function financedPdfDocument(refs,created){
     if(age){doc.setFontSize(9);doc.text(financedPdfText(`Âge : ${age}`),margin+5,dateY+8);}
   y+=boxHeight+7;
  };
- const projection=financedPdfValue('scenario')==='projection';
  const resultPanels=[...document.querySelectorAll('#fundingResult > .panel')],fundingPanel=resultPanels.at(-1);
  doc.setProperties({title:'Date de retraite financée - calcul de prévoyance',subject:`Oeuvre ${refs.oeuvre} - Personne ${refs.personne}`,creator:'Projection 105% - export retraite financée v1'});
  doc.setFont('helvetica','bold');doc.setFontSize(21);doc.setTextColor(...green);doc.text('Date de retraite financée',margin,y);y+=11;
  addText(`N° d’œuvre : ${refs.oeuvre}\nN° de personne : ${refs.personne}`);
- addText(`Enregistré le ${financedPdfDate(created)} à ${created.toLocaleTimeString('fr-CH')} (heure locale).\nMéthode : ${projection?'projection de l’avoir':'tabelle de rachat'}.`);
+ addText(`Enregistré le ${financedPdfDate(created)} à ${created.toLocaleTimeString('fr-CH')} (heure locale).\nMéthode : ${financedPdfMethod()}.`);
  addFundingHighlight(fundingPanel);
  const retainedMetrics=[...(fundingPanel?.querySelectorAll(':scope > .result-metric')||[])].map(row=>[
   row.querySelector('span')?.textContent.trim()||'',

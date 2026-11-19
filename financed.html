@@ -49,12 +49,17 @@ input[readonly]{color:#91a0b6;background:#142237}
 @media(max-width:900px){body{padding:24px 20px 36px}}
 @media(max-width:800px){#tableInputs{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:520px){body{padding:18px 12px}.fields{grid-template-columns:minmax(0,1fr)}.panel,#tables .panel{padding:14px}.brackets{min-width:390px}}
+#externalTable{display:block;width:100%;max-width:100%;min-width:0;margin-top:7px;padding:10px;border:1px solid #2b3d53;border-radius:8px;background:#0c1726;color:#e7eef8;font:12px Consolas,monospace;resize:vertical}
+#externalTable:focus-visible{outline:2px solid #7dd3fc;outline-offset:2px}
+#externalUpload{display:inline-flex;align-items:center;gap:8px;max-width:100%;margin-bottom:14px}
+#externalUpload img{width:18px;height:18px;flex-shrink:0;filter:invert(1)}
+#externalSheetField{margin-bottom:14px}
 </style></head><body>
 <span class="badge">BROUILLON À TESTER · MODULE INDÉPENDANT</span><h1>Date de retraite financée</h1>
 <p class="muted">Calcule les maxima rachetables par tabelle ou projection de l’avoir, puis la première date entièrement financée. Les saisies sont conservées dans ce navigateur et restent indépendantes de la projection du 105 %.</p>
 <div id="calculatorLayout"><form id="financedForm" novalidate>
 <section class="panel"><h2>Scénario et paramètres</h2><div class="fields">
-<label>Méthode de calcul<select id="scenario"><option value="table">Tabelle de rachat</option><option value="projection">Projection de l’avoir</option></select></label>
+<label>Méthode de calcul<select id="scenario"><option value="table">Tabelle de rachat FCT</option><option value="projection">Projection de l’avoir</option><option value="external">Tabelle de rachat (externe)</option></select></label>
 <label>Type de plan<select id="planType"><option>Base</option><option>1e</option></select></label>
 <label id="sexField" hidden>Sexe<select id="sex"><option>Homme</option><option>Femme</option></select></label>
 <label id="yearField" hidden>Année<select id="year"><option>2026</option><option selected>2027</option></select></label>
@@ -65,6 +70,7 @@ input[readonly]{color:#91a0b6;background:#142237}
 <label id="projectionCurrentRateField" hidden>Taux de projection jusqu’au 31.12.<span id="projectionCurrentYear"></span> (%)<input id="projectionCurrentRate" type="text" inputmode="decimal" value="2.00"></label>
 <label id="projectionNextRateField" hidden>Taux de projection dès le 01.01.<span id="projectionNextYear"></span> (%)<input id="projectionNextRate" type="text" inputmode="decimal" value="2.00"></label>
 </div></section>
+<section class="panel" id="externalInputs" hidden><h2>Tabelle de rachat (externe)</h2><button id="externalUpload" type="button"><img src="vendor/upload.svg" alt="" aria-hidden="true"><span>Importer la tabelle Excel</span></button><input id="externalFile" type="file" accept=".xlsx,.xls,.xlsm,.tsv,.txt" hidden><label id="externalSheetField" hidden>Feuille<select id="externalSheet"></select></label><p class="note" id="externalFileStatus" role="status" aria-live="polite"></p><textarea id="externalTable" hidden></textarea><p class="note" id="externalImportStatus" role="status"></p></section>
 <section class="panel" id="fundingInputs"><h2>Données du financement · un seul plan</h2><div class="fields">
 <label>Date de naissance<input id="fundBirth" type="text" placeholder="jj.mm.aaaa" maxlength="10" value="01.01.1968"></label>
 <label><span id="fundDateLabel">Date du dernier rachat</span><input id="fundDate" type="text" placeholder="jj.mm.aaaa" maxlength="10"></label>
@@ -79,7 +85,7 @@ input[readonly]{color:#91a0b6;background:#142237}
 <button id="buildTables" type="submit" class="primary">Construire les tabelles et calculer la date financée</button><p><button id="clearSavedInputs" type="button">Effacer les saisies mémorisées</button></p><p id="error" class="error" role="alert"></p><p id="stale" class="stale" hidden>Données modifiées : relance le calcul pour actualiser les résultats.</p>
 <button id="saveFinancedPdf" type="button" class="primary pdf-button" hidden disabled>Enregistrer en PDF</button>
 </form><aside id="fundingResult" aria-live="polite"></aside></div><div id="tables" aria-live="polite"></div>
-<script src="jspdf.umd.min.js"></script><script src="jspdf.plugin.autotable.min.js"></script><script src="financed-calculator.js?v=12"></script><script>
+<script src="jspdf.umd.min.js"></script><script src="jspdf.plugin.autotable.min.js"></script><script src="vendor/xlsx.full.min.js"></script><script src="financed-calculator.js?v=12"></script><script>
 'use strict';
 const $=id=>document.getElementById(id);
 const number=value=>value.trim()===''?NaN:Number(value.replace(/[\u0060'’\s]/g,''));
@@ -87,11 +93,49 @@ const format=(v,d=3)=>v.toLocaleString('en-US',{minimumFractionDigits:d,maximumF
 const ageLabel=v=>Number.isInteger(v)?String(v):format(v,2);
 const dateLabel=date=>`${String(date.getDate()).padStart(2,'0')}.${String(date.getMonth()+1).padStart(2,'0')}.${date.getFullYear()}`;
 $('fundDate').value=`01.01.${new Date().getFullYear()}`;
+let externalWorkbook=null,externalFileName='';
+function applyExternalImport(text){
+ const entries=parseExternalPurchaseTable(text);
+ $('externalTable').value=text;
+ $('externalTable').dispatchEvent(new Event('input',{bubbles:true}));
+ $('externalFileStatus').textContent=`${externalFileName} : ${entries.length} coefficients importés.`;
+}
+function importExternalSheet(){
+ try{
+  const sheet=externalWorkbook.Sheets[$('externalSheet').value];
+  if(!sheet?.['!ref'])throw Error('La feuille sélectionnée est vide.');
+  const range=XLSX.utils.decode_range(sheet['!ref']);range.s.c=0;
+  const alignedSheet={...sheet,'!ref':XLSX.utils.encode_range(range)};
+  applyExternalImport(XLSX.utils.sheet_to_csv(alignedSheet,{FS:'\t',RS:'\n',blankrows:false}));
+ }catch(error){$('externalFileStatus').textContent=error.message||'Impossible de lire cette feuille Excel.';}
+}
+$('externalUpload').onclick=()=>$('externalFile').click();
+$('externalSheet').onchange=importExternalSheet;
+$('externalFile').onchange=async()=>{
+ const file=$('externalFile').files[0];
+ if(!file)return;
+ $('externalUpload').disabled=true;$('externalSheet').disabled=true;
+ $('externalFileStatus').textContent='Lecture du fichier…';
+ externalWorkbook=null;externalFileName=file.name;
+ $('externalSheet').replaceChildren();$('externalSheetField').hidden=true;
+ try{
+  if(/\.(tsv|txt)$/i.test(file.name)){applyExternalImport(await file.text());return;}
+  if(!/\.(xlsx|xls|xlsm)$/i.test(file.name))throw Error('Choisis un fichier Excel (.xlsx, .xls, .xlsm) ou tabulé (.tsv, .txt).');
+  if(!globalThis.XLSX)throw Error('Le lecteur Excel est indisponible. Recharge la page.');
+  externalWorkbook=XLSX.read(await file.arrayBuffer(),{type:'array',cellFormula:false,cellHTML:false});
+  if(!externalWorkbook.SheetNames.length)throw Error('Ce classeur ne contient aucune feuille.');
+  for(const name of externalWorkbook.SheetNames){const option=document.createElement('option');option.value=name;option.textContent=name;$('externalSheet').append(option);}
+  $('externalSheetField').hidden=externalWorkbook.SheetNames.length<2;
+  importExternalSheet();
+ }catch(error){$('externalFileStatus').textContent=error.message||'Impossible de lire ce fichier Excel.';}
+ finally{$('externalUpload').disabled=false;$('externalSheet').disabled=false;$('externalFile').value='';}
+};
 ['lastPurchase','previousPurchases','fundSalary','initialBalance'].forEach(id=>$(id).addEventListener('blur',()=>{const v=number($(id).value);if(Number.isFinite(v))$(id).value=format(v,2);saveFinancedInputs();}));
 const rates=new Map(Array.from({length:13},(_,i)=>[58+i,(4.5+i*.1).toFixed(2)]));
 const savedRateSets=new Map([['Base',rates]]);
 let rateSetKey='Base',baseInterests=['2.00','2.00'],baseProjectionInterests=['2.00','2.00'];
 function loadPlanRates(){
+ if($('scenario').value==='external'){$('sexField').hidden=false;$('yearField').hidden=true;return;}
  const is1e=$('planType').value==='1e';
  $('sexField').hidden=!is1e;$('yearField').hidden=!is1e;
  const nextKey=is1e?`${$('year').value}-${$('sex').value}`:'Base';
@@ -114,7 +158,7 @@ $('addBracket').onclick=()=>{const last=$('brackets').lastElementChild;const fro
 function renderRates(){const age=number($('regAge').value);if(!Number.isFinite(age)||age<58||age>70)return;$('rates').replaceChildren();for(let n=58;n<=Math.ceil(age);n++){const tr=document.createElement('tr');tr.innerHTML=`<td>${n}</td><td><input type="text" inputmode="decimal" aria-label="Taux de conversion à ${n} ans"></td>`;const input=tr.querySelector('input');input.value=rates.get(n);input.oninput=()=>rates.set(n,input.value);$('rates').append(tr);}}
 function markStale(){if($('tables').hasChildNodes()||$('fundingResult').hasChildNodes())$('stale').hidden=false;}
 const FINANCED_INPUTS_KEY='projection105.financed.inputs.v1';
-const financedFieldIds=['scenario','planType','sex','year','regAge','minimumAge','pastRate','futureRate','projectionCurrentRate','projectionNextRate','fundBirth','fundDate','fundSalary','initialBalance','lastPurchase','previousPurchases'];
+const financedFieldIds=['scenario','planType','sex','year','regAge','minimumAge','pastRate','futureRate','projectionCurrentRate','projectionNextRate','fundBirth','fundDate','fundSalary','initialBalance','lastPurchase','previousPurchases','externalTable'];
 function saveFinancedInputs(){
  try{
   if(rateSetKey==='Base'){
@@ -126,7 +170,8 @@ function saveFinancedInputs(){
   const brackets=[...$('brackets').rows].map(row=>({from:row.querySelector('.from').value,to:row.querySelector('.to').value,rate:row.querySelector('.bonus').value}));
   const rateSets=[...savedRateSets].map(([key,set])=>[key,[...set]]);
   localStorage.setItem(FINANCED_INPUTS_KEY,JSON.stringify({fields,brackets,rateSets,baseInterests,baseProjectionInterests}));
- }catch(error){}
+  $('externalImportStatus').textContent='';
+ }catch(error){$('externalImportStatus').textContent='Les saisies ne peuvent pas être mémorisées dans ce navigateur. Conserve une copie de la tabelle Excel avant de fermer la page.';}
 }
 function restoreFinancedInputs(){
  let saved;
@@ -166,13 +211,16 @@ function setFinancedPdfAvailable(available){$('saveFinancedPdf').hidden=!availab
 $('financedForm').addEventListener('input',()=>{markStale();saveFinancedInputs();setFinancedPdfAvailable(false);});$('financedForm').addEventListener('change',()=>{markStale();saveFinancedInputs();setFinancedPdfAvailable(false);});
 $('clearSavedInputs').onclick=()=>{try{localStorage.removeItem(FINANCED_INPUTS_KEY);}catch(error){}location.reload();};
 $('scenario').onchange=()=>{
- const projection=$('scenario').value==='projection';
+ const projection=$('scenario').value==='projection',external=$('scenario').value==='external';
+ $('externalInputs').hidden=!external;$('tableInputs').hidden=external;
+ $('planType').closest('label').hidden=external;
+ loadPlanRates();
  $('initialBalanceField').hidden=!projection;
- $('pastRate').closest('label').hidden=projection;$('futureRate').closest('label').hidden=projection;
+ $('pastRate').closest('label').hidden=projection||external;$('futureRate').closest('label').hidden=projection||external;
  $('projectionCurrentRateField').hidden=!projection;$('projectionNextRateField').hidden=!projection;$('scenarioNote').hidden=!projection;
  $('fundDateLabel').textContent='Date du dernier rachat';
  updateProjectionRateLabels();
- $('buildTables').textContent=projection?'Projeter l’avoir, puis calculer la date financée':'Construire les tabelles et calculer la date financée';
+ $('buildTables').textContent=external?'Calculer avec la tabelle externe':projection?'Projeter l’avoir, puis calculer la date financée':'Construire les tabelles et calculer la date financée';
  $('fundingResult').replaceChildren();$('tables').replaceChildren();$('error').textContent='';$('stale').hidden=true;setFinancedPdfAvailable(false);
 };
 function updateProjectionRateLabels(){
@@ -247,9 +295,29 @@ function renderProjection(input){
  updateFundingPresentation(maximums.birth,funding,true);
  $('stale').hidden=true;
 }
+function renderExternal(){
+ const birth=parseFinancedDate($('fundBirth').value),purchaseDate=parseFinancedDate($('fundDate').value);
+ const minimumAge=number($('minimumAge').value),retirementAge=number($('regAge').value);
+ const result=buildExternalPurchaseTables({text:$('externalTable').value,sex:$('sex').value,retirementAge,minimumAge,birth,purchaseDate});
+ const funding=calculateFinancedDate(result,{birth,purchaseDate,minimumAge,salary:number($('fundSalary').value),lastPurchase:number($('lastPurchase').value),previousPurchases:number($('previousPurchases').value)});
+ const retained=funding.retainedCandidate,retainedDate=retirementDateForCandidate(retained);
+ const display=retained?fundingAtFinancedDate(retained,birth,retainedDate,funding.lastPurchase,!funding.lastUnfunded):null;
+ $('fundingResult').innerHTML=`<section class="panel"><h2>Date de retraite financée · tabelle externe</h2>${renderFundingSummary(retained,display,funding,retainedDate)}<p class="note">Les coefficients externes sont appliqués directement au salaire assuré, sans nouvel escompte.</p><details><summary>Détail du financement mensuel</summary>${grid(['Date de retraite affichée'],funding.candidates.map(()=>['']))}</details></section>`;
+ updateFundingPresentation(birth,funding,false);
+ const purchaseAges=[...new Set(result.importedFuture.map(row=>row.age))].sort((left,right)=>left-right);
+ const retirementAges=[...new Set(result.importedFuture.map(row=>row.targetAge))].filter(age=>age>=minimumAge&&age<=retirementAge).sort((left,right)=>left-right);
+ const coefficients=new Map(result.importedFuture.map(row=>[`${row.age}/${row.targetAge}`,row.percent]));
+ const futureRows=purchaseAges.map(age=>[age,...retirementAges.map(target=>{
+  const value=coefficients.get(`${age}/${target}`);
+  return value===undefined?'-':format(value,6);
+ })]);
+ $('tables').innerHTML=`${result.past.length?`<section class="panel"><details open><summary>Tabelle externe de rachat du passé</summary>${grid(['Âge','Coefficient (%)'],result.past.map(row=>[ageLabel(row.age),format(row.percent,6)]))}</details></section>`:''}<section class="panel"><details open><summary>Tabelle externe de rachat du futur</summary>${grid(['Âge au rachat',...retirementAges.map(age=>`Retraite ${ageLabel(age)} ans (%)`)],futureRows)}</details></section><section class="panel"><details><summary>Coefficients utilisés pour l’interpolation</summary>${grid(['Âge au rachat',...result.targets.map(age=>`Retraite ${ageLabel(age)} ans (%)`)],result.future.map(row=>[row.age,...row.coefficients.map(value=>format(value*100,6))]))}</details><p class="note">Sexe : ${result.sex}. Pour une cible dépassée, reprise du coefficient diagonal de la ligne. Les rachats antérieurs sont déduits à chaque borne avant interpolation mensuelle, avec un minimum de zéro. La tabelle du passé est affichée uniquement à titre de référence.</p></section>`;
+ $('tables').hidden=false;$('stale').hidden=true;setFinancedPdfAvailable(true);
+}
 $('financedForm').onsubmit=event=>{
  event.preventDefault();$('error').textContent='';
  try{
+ if($('scenario').value==='external'){renderExternal();return;}
  const input={type:$('planType').value,retirementAge:number($('regAge').value),pastInterest:number($('pastRate').value),futureInterest:number($('futureRate').value),currentYearInterest:number($('projectionCurrentRate').value),nextYearInterest:number($('projectionNextRate').value),brackets:[...$('brackets').rows].map(tr=>({from:number(tr.querySelector('.from').value),to:number(tr.querySelector('.to').value),rate:number(tr.querySelector('.bonus').value)})),rates:Object.fromEntries([...rates].map(([a,r])=>[a,number(r)]))};
  if($('scenario').value==='projection'){renderProjection(input);setFinancedPdfAvailable(true);return;}
  const result=buildPurchaseTables(input);

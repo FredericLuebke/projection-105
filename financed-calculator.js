@@ -50,6 +50,74 @@ function buildPurchaseTables(input){
  return {input:{...input,brackets:sorted},start,past,targets,costs,future,targetPension,regulatoryCoefficient:pastAt(retirementAge)};
 }
 
+function parseExternalPurchaseTable(text){
+ if(!text.trim())throw Error('Colle la tabelle Excel externe avant de calculer.');
+ const records=[];let fields=[],field='',quoted=false,line=1,recordLine=1;
+ for(let index=0;index<text.length;index++){
+  const character=text[index];
+  if(character==='"'){
+   if(quoted&&text[index+1]==='"'){field+='"';index++;}
+   else if(quoted||field==='')quoted=!quoted;
+   else field+=character;
+  }else if(!quoted&&character==='\t'){fields.push(field);field='';}
+  else if(!quoted&&(character==='\r'||character==='\n')){
+   fields.push(field);records.push({fields,line:recordLine});fields=[];field='';
+   if(character==='\r'&&text[index+1]==='\n')index++;
+   line++;recordLine=line;
+  }else{field+=character;if(character==='\n')line++;}
+ }
+ if(quoted)throw Error('Le collage Excel contient une cellule entre guillemets non fermée.');
+ fields.push(field);records.push({fields,line:recordLine});
+ const entries=new Map();
+ const numeric=value=>{
+  const cleaned=String(value??'').trim().replace(/[%\s\u0060'’]/g,'').replace(',','.');
+  return cleaned===''?NaN:Number(cleaned);
+ };
+ for(const record of records){
+  const cells=record.fields;
+  if(cells.every(value=>!value.trim()))continue;
+  if(cells[2]?.trim()==='Elémtab_noélém_c1')continue;
+  const sourceAge=numeric(cells[2]),sex=numeric(cells[3]),targetAge=numeric(cells[4]),percent=numeric(cells[6]);
+  if(!Number.isInteger(sourceAge)||sourceAge<0||sourceAge>100||![1,2].includes(sex)||!Number.isFinite(targetAge)||targetAge<0||targetAge>100||Math.abs(targetAge*12-Math.round(targetAge*12))>1e-8||!Number.isFinite(percent))throw Error(`Ligne ${record.line} : vérifie les colonnes C, D, E et G (âges, sexe 1/2 et coefficient en %).`);
+  const past=sourceAge===100,age=past?targetAge:sourceAge;
+  const key=`${sex}/${past?'past':'future'}/${age}/${past?'':targetAge}`;
+  const existing=entries.get(key);
+  if(existing&&existing.percent!==percent)throw Error(`Lignes ${existing.line} et ${record.line} : coefficients contradictoires pour le même sexe et les mêmes âges.`);
+  if(!existing)entries.set(key,{sex,past,age,targetAge,percent,line:record.line});
+ }
+ if(!entries.size)throw Error('La tabelle externe ne contient aucun coefficient.');
+ return [...entries.values()];
+}
+function buildExternalPurchaseTables({text,sex,retirementAge,minimumAge,birth,purchaseDate}){
+ if(!['Homme','Femme'].includes(sex))throw Error('Choisis le sexe de la tabelle externe.');
+ if(!Number.isFinite(retirementAge)||retirementAge<58||retirementAge>70||Math.abs(retirementAge*12-Math.round(retirementAge*12))>1e-8||!Number.isFinite(minimumAge)||minimumAge<58||minimumAge>retirementAge)throw Error('Vérifie les âges minimal et réglementaire.');
+ const entries=parseExternalPurchaseTable(text).filter(entry=>entry.sex===(sex==='Homme'?1:2));
+ const importedFuture=entries.filter(entry=>!entry.past).sort((left,right)=>left.age-right.age||left.targetAge-right.targetAge);
+ if(!importedFuture.length)throw Error(`Aucun coefficient de rachat futur pour ${sex}.`);
+ if(!(birth instanceof Date)||!(purchaseDate instanceof Date)||!Number.isFinite(birth.getTime())||!Number.isFinite(purchaseDate.getTime()))throw Error('Vérifie les dates de naissance et de rachat.');
+ const purchaseAge=purchaseDate.getFullYear()-birth.getFullYear()+purchaseDate.getMonth()/12;
+ const requiredAges=[...new Set([Math.floor(purchaseAge),Math.ceil(purchaseAge)])];
+ const targets=[];
+ for(let age=Math.floor(minimumAge);age<retirementAge;age++)targets.push(age);
+ targets.push(retirementAge);
+ const coefficientAt=(age,target)=>{
+  if(age>retirementAge)return 0;
+  const effectiveTarget=Math.max(age,target);
+  const row=importedFuture.filter(entry=>entry.age===age);
+  const exact=row.find(entry=>entry.targetAge===effectiveTarget);
+  if(exact)return exact.percent/100;
+  const lower=[...row].reverse().find(entry=>entry.targetAge<effectiveTarget),upper=row.find(entry=>entry.targetAge>effectiveTarget);
+  if(!Number.isInteger(effectiveTarget)&&lower&&upper){
+   const weight=(effectiveTarget-lower.targetAge)/(upper.targetAge-lower.targetAge);
+   return (lower.percent*(1-weight)+upper.percent*weight)/100;
+  }
+  throw Error(`Coefficient externe manquant : ${sex}, âge au rachat ${age}, retraite à ${effectiveTarget} ans.`);
+ };
+ const future=requiredAges.map(age=>({age,coefficients:targets.map(target=>coefficientAt(age,target))}));
+ const past=entries.filter(entry=>entry.past).sort((left,right)=>left.age-right.age);
+ return {input:{retirementAge},targets,future,past,importedFuture,sex};
+}
+
 function parseFinancedDate(value){
  const match=/^(\d{2})\.(\d{2})\.(\d{4})$/.exec(value.trim());
  if(!match)throw Error('Saisis les dates au format jj.mm.aaaa.');
