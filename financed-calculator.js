@@ -101,9 +101,11 @@ function buildExternalPurchaseTables({text,sex,retirementAge,minimumAge,birth,pu
  for(let age=Math.floor(minimumAge);age<retirementAge;age++)targets.push(age);
  targets.push(retirementAge);
  const coefficientAt=(age,target)=>{
+  const row=importedFuture.filter(entry=>entry.age===age);
+  const imported=row.find(entry=>entry.targetAge===target);
+  if(imported)return imported.percent/100;
   if(age>retirementAge)return 0;
   const effectiveTarget=Math.max(age,target);
-  const row=importedFuture.filter(entry=>entry.age===age);
   const exact=row.find(entry=>entry.targetAge===effectiveTarget);
   if(exact)return exact.percent/100;
   const lower=[...row].reverse().find(entry=>entry.targetAge<effectiveTarget),upper=row.find(entry=>entry.targetAge>effectiveTarget);
@@ -221,6 +223,42 @@ function financeProjectedMaximums(maximums,{lastPurchase,previousPurchases}){
  }
  const lastUnfunded=[...candidates].reverse().find(c=>!c.funded)||null;
  return {endpoints,candidates,financed:candidates.find(c=>c.funded)||null,lastUnfunded,retainedCandidate:lastUnfunded||candidates[0]||null,lastPurchase,previousPurchases};
+}
+function calculateFinancedPlan(common,plan){
+ const options={birth:common.birth,purchaseDate:common.purchaseDate,minimumAge:common.minimumAge,salary:plan.salary,previousPurchases:plan.previousPurchases,lastPurchase:0};
+ if(plan.scenario==='projection'){
+  const maximums=buildProjectedPurchaseMaximums({birth:common.birth,start:common.purchaseDate,initial:plan.initial,salary:plan.salary,currentYearInterest:plan.currentYearInterest,nextYearInterest:plan.nextYearInterest,brackets:plan.brackets,rates:plan.rates,retirementAge:common.retirementAge,minimumAge:common.minimumAge});
+  return {scenario:plan.scenario,maximums,funding:financeProjectedMaximums(maximums,options)};
+ }
+ if(!['table','external'].includes(plan.scenario))throw Error('Méthode de calcul du plan inconnue.');
+ const tables=plan.scenario==='external'
+  ?buildExternalPurchaseTables({text:plan.externalTable,sex:common.sex,retirementAge:common.retirementAge,minimumAge:common.minimumAge,birth:common.birth,purchaseDate:common.purchaseDate})
+  :buildPurchaseTables({type:plan.type,pastInterest:plan.pastInterest,futureInterest:plan.futureInterest,retirementAge:common.retirementAge,brackets:plan.brackets,rates:plan.rates});
+ return {scenario:plan.scenario,tables,funding:calculateFinancedDate(tables,options)};
+}
+function combineFinancedPlans(plans,lastPurchase){
+ if(!Array.isArray(plans)||plans.length<1||plans.length>3)throw Error('Choisis entre un et trois plans.');
+ if(!Number.isFinite(lastPurchase)||lastPurchase<0)throw Error('Le dernier rachat global doit être positif ou nul.');
+ const dateOf=candidate=>candidate.effectiveDate||candidate.date;
+ const indexed=plans.map((plan,index)=>{
+  const byDate=new Map();
+  for(const candidate of plan.funding.candidates){
+   const date=dateOf(candidate),key=date?.getTime();
+   if(!Number.isFinite(key)||!Number.isFinite(candidate.required)||!Number.isFinite(candidate.maximum)||byDate.has(key))throw Error(`Plan ${index+1} : échéances mensuelles invalides.`);
+   byDate.set(key,candidate);
+  }
+  return byDate;
+ });
+ const candidates=[...indexed[0].keys()].filter(key=>indexed.every(plan=>plan.has(key))).sort((left,right)=>left-right).map(key=>{
+  const contributions=indexed.map(plan=>plan.get(key));
+  const required=contributions.reduce((sum,candidate)=>sum+candidate.required,0);
+  const maximum=contributions.reduce((sum,candidate)=>sum+candidate.maximum,0);
+  if(!Number.isFinite(required)||!Number.isFinite(maximum))throw Error('Le cumul des plans dépasse les limites de calcul.');
+  return {date:new Date(key),effectiveDate:new Date(key),months:contributions[0].months,required,maximum,contributions,funded:required<=lastPurchase,balance:lastPurchase-required};
+ });
+ if(!candidates.length)throw Error('Aucune date de retraite commune aux plans sélectionnés.');
+ const lastUnfunded=[...candidates].reverse().find(candidate=>!candidate.funded)||null;
+ return {plans,candidates,lastPurchase,lastUnfunded,financed:candidates.find(candidate=>candidate.funded)||null,retainedCandidate:lastUnfunded||candidates[0],restrictedCoverage:indexed.some(plan=>plan.size!==candidates.length)};
 }
 function calculateFinancedDate(tables,{birth,purchaseDate,lastPurchase,previousPurchases,salary,minimumAge=58}){
  if(!(birth instanceof Date)||!(purchaseDate instanceof Date)||!Number.isFinite(birth.getTime())||!Number.isFinite(purchaseDate.getTime())||purchaseDate<=birth)throw Error('Vérifie la naissance et la date du dernier rachat.');

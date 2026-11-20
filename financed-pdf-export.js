@@ -41,8 +41,25 @@ function financedPdfElementText(element){
 function financedPdfSafeName(value){return value.normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,60)||'reference';}
 function financedPdfDate(date){return `${String(date.getDate()).padStart(2,'0')}.${String(date.getMonth()+1).padStart(2,'0')}.${date.getFullYear()}`;}
 function financedPdfValue(id){const element=document.getElementById(id);return element?.value??'';}
-function financedPdfMethod(){return financedPdfValue('scenario')==='external'?'Tabelle de rachat (externe)':financedPdfValue('scenario')==='projection'?'Projection de l’avoir':'Tabelle de rachat FCT';}
+function financedPdfMethod(){return lastFinancedRun?(lastFinancedRun.plans.length>1?`Cumul de ${lastFinancedRun.plans.length} plans`:financedMethodLabel(lastFinancedRun.plans[0].scenario)):financedMethodLabel(financedPdfValue('scenario'));}
+function financedRunPdfInputs(run){
+ const common=run.common;
+ const rows=[['Nombre de plans',String(run.plans.length)],['Date de naissance',financedPdfDate(common.birth)],['Sexe',common.sex],['Date du dernier rachat global',financedPdfDate(common.purchaseDate)],['Âge minimal de retraite anticipée',String(common.minimumAge)],['Âge de retraite réglementaire',String(common.retirementAge)],['Dernier rachat global (CHF)',format(common.lastPurchase,2)]];
+ run.plans.forEach((plan,index)=>{
+  const parameters=plan.parameters,prefix=`Plan ${index+1} - `;
+  rows.push([`${prefix}Méthode`,financedMethodLabel(plan.scenario)],[`${prefix}Salaire assuré (CHF)`,format(parameters.salary,2)],[`${prefix}Rachats antérieurs (CHF)`,format(parameters.previousPurchases,2)]);
+  if(plan.scenario==='external'){rows.push([`${prefix}Source`,'Tabelle Excel externe, coefficients en % du salaire, sans nouvel escompte.']);return;}
+  rows.push([`${prefix}Type de plan`,parameters.type]);
+  if(parameters.type==='1e')rows.push([`${prefix}Année du plan 1e`,parameters.year]);
+  if(plan.scenario==='projection')rows.push([`${prefix}Avoir sans rachats futurs (CHF)`,format(parameters.initial,2)],[`${prefix}Taux jusqu’au 31.12.${common.purchaseDate.getFullYear()} (%)`,String(parameters.currentYearInterest)],[`${prefix}Taux dès le 01.01.${common.purchaseDate.getFullYear()+1} (%)`,String(parameters.nextYearInterest)]);
+  else rows.push([`${prefix}Intérêt des rachats du passé (%)`,String(parameters.pastInterest)],[`${prefix}Intérêt / escompte du futur (%)`,String(parameters.futureInterest)]);
+  rows.push([`${prefix}Bonifications`,parameters.brackets.map(row=>`${row.from}-${row.to} ans : ${row.rate} %`).join('\n')]);
+  rows.push([`${prefix}Taux de conversion`,Object.entries(parameters.rates).filter(([age,value])=>Number(age)<=Math.ceil(common.retirementAge)&&Number.isFinite(value)).map(([age,value])=>`${age} ans : ${value} %`).join('\n')]);
+ });
+ return rows;
+}
 function financedPdfInputs(){
+ if(lastFinancedRun)return financedRunPdfInputs(lastFinancedRun);
  const projection=financedPdfValue('scenario')==='projection',external=financedPdfValue('scenario')==='external';
  const rows=[
   ['Méthode de calcul',financedPdfMethod()],
@@ -80,6 +97,7 @@ function financedPdfInputs(){
  return rows;
 }
 function financedPdfDocument(refs,created){
+ if(!lastFinancedRun||!document.getElementById('stale').hidden)throw Error('Relance le calcul avant de créer le PDF.');
  if(!globalThis.jspdf?.jsPDF)throw Error('La bibliothèque PDF est indisponible. Recharge la page et réessaie.');
  const doc=new globalThis.jspdf.jsPDF({orientation:'portrait',unit:'mm',format:'a4',compress:true});
  if(typeof doc.autoTable!=='function')throw Error('Le module de tableaux PDF est indisponible. Recharge la page.');
@@ -94,7 +112,8 @@ function financedPdfDocument(refs,created){
  const addHeading=(title,landscape=false)=>{
   doc.addPage('a4',landscape?'landscape':'portrait');y=25;
   doc.setFont('helvetica','bold');doc.setFontSize(15);doc.setTextColor(...green);
-  doc.text(financedPdfText(title),margin,y);y+=9;
+  const lines=doc.splitTextToSize(financedPdfText(title),doc.internal.pageSize.getWidth()-margin*2);
+  doc.text(lines,margin,y);y+=9+(lines.length-1)*6.1;
  };
  const addWarning=(title,value)=>{
   doc.setFont('helvetica','bold');doc.setFontSize(15);doc.setTextColor(...green);
@@ -121,7 +140,7 @@ function financedPdfDocument(refs,created){
     if(age){doc.setFontSize(9);doc.text(financedPdfText(`Âge : ${age}`),margin+5,dateY+8);}
   y+=boxHeight+7;
  };
- const resultPanels=[...document.querySelectorAll('#fundingResult > .panel')],fundingPanel=resultPanels.at(-1);
+ const resultPanels=[...document.querySelectorAll('#fundingResult > .panel')],fundingPanel=document.getElementById('combinedFundingSummary');
  doc.setProperties({title:'Date de retraite financée - calcul de prévoyance',subject:`Oeuvre ${refs.oeuvre} - Personne ${refs.personne}`,creator:'Projection 105% - export retraite financée v1'});
  doc.setFont('helvetica','bold');doc.setFontSize(21);doc.setTextColor(...green);doc.text('Date de retraite financée',margin,y);y+=11;
  addText(`N° d’œuvre : ${refs.oeuvre}\nN° de personne : ${refs.personne}`);

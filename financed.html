@@ -54,6 +54,9 @@ input[readonly]{color:#91a0b6;background:#142237}
 #externalUpload{display:inline-flex;align-items:center;gap:8px;max-width:100%;margin-bottom:14px}
 #externalUpload img{width:18px;height:18px;flex-shrink:0;filter:invert(1)}
 #externalSheetField{margin-bottom:14px}
+#financedPlanTabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+#financedPlanTabs button[aria-selected="true"]{background:#8bd5f7;color:#071523;border-color:#8bd5f7}
+#planEditor{min-width:0}
 </style></head><body>
 <span class="badge">BROUILLON À TESTER · MODULE INDÉPENDANT</span><h1>Date de retraite financée</h1>
 <p class="muted">Calcule les maxima rachetables par tabelle ou projection de l’avoir, puis la première date entièrement financée. Les saisies sont conservées dans ce navigateur et restent indépendantes de la projection du 105 %.</p>
@@ -115,6 +118,8 @@ $('externalFile').onchange=async()=>{
  const file=$('externalFile').files[0];
  if(!file)return;
  $('externalUpload').disabled=true;$('externalSheet').disabled=true;
+ $('financedPlanCount').disabled=true;$('buildTables').disabled=true;
+ for(const button of $('financedPlanTabs').querySelectorAll('button'))button.disabled=true;
  $('externalFileStatus').textContent='Lecture du fichier…';
  externalWorkbook=null;externalFileName=file.name;
  $('externalSheet').replaceChildren();$('externalSheetField').hidden=true;
@@ -128,16 +133,16 @@ $('externalFile').onchange=async()=>{
   $('externalSheetField').hidden=externalWorkbook.SheetNames.length<2;
   importExternalSheet();
  }catch(error){$('externalFileStatus').textContent=error.message||'Impossible de lire ce fichier Excel.';}
- finally{$('externalUpload').disabled=false;$('externalSheet').disabled=false;$('externalFile').value='';}
+ finally{$('externalUpload').disabled=false;$('externalSheet').disabled=false;$('externalFile').value='';$('financedPlanCount').disabled=false;$('buildTables').disabled=false;for(const button of $('financedPlanTabs').querySelectorAll('button'))button.disabled=false;}
 };
 ['lastPurchase','previousPurchases','fundSalary','initialBalance'].forEach(id=>$(id).addEventListener('blur',()=>{const v=number($(id).value);if(Number.isFinite(v))$(id).value=format(v,2);saveFinancedInputs();}));
 const rates=new Map(Array.from({length:13},(_,i)=>[58+i,(4.5+i*.1).toFixed(2)]));
 const savedRateSets=new Map([['Base',rates]]);
 let rateSetKey='Base',baseInterests=['2.00','2.00'],baseProjectionInterests=['2.00','2.00'];
 function loadPlanRates(){
- if($('scenario').value==='external'){$('sexField').hidden=false;$('yearField').hidden=true;return;}
+ if($('scenario').value==='external'){$('yearField').hidden=true;return;}
  const is1e=$('planType').value==='1e';
- $('sexField').hidden=!is1e;$('yearField').hidden=!is1e;
+ $('yearField').hidden=!is1e;
  const nextKey=is1e?`${$('year').value}-${$('sex').value}`:'Base';
  if(rateSetKey==='Base'&&is1e){baseInterests=[$('pastRate').value,$('futureRate').value];baseProjectionInterests=[$('projectionCurrentRate').value,$('projectionNextRate').value];}
  savedRateSets.set(rateSetKey,new Map(rates));
@@ -156,28 +161,36 @@ function addBracket(from,to,rate){const tr=document.createElement('tr');tr.inner
 [[18,24,7],[25,34,10],[35,44,15],[45,54,18],[55,70,20]].forEach(b=>addBracket(...b));
 $('addBracket').onclick=()=>{const last=$('brackets').lastElementChild;const from=last?Number(last.querySelector('.to').value)+1:18;addBracket(from,70,'0.00');markStale();saveFinancedInputs();};
 function renderRates(){const age=number($('regAge').value);if(!Number.isFinite(age)||age<58||age>70)return;$('rates').replaceChildren();for(let n=58;n<=Math.ceil(age);n++){const tr=document.createElement('tr');tr.innerHTML=`<td>${n}</td><td><input type="text" inputmode="decimal" aria-label="Taux de conversion à ${n} ans"></td>`;const input=tr.querySelector('input');input.value=rates.get(n);input.oninput=()=>rates.set(n,input.value);$('rates').append(tr);}}
-function markStale(){if($('tables').hasChildNodes()||$('fundingResult').hasChildNodes())$('stale').hidden=false;}
+function markStale(){if(restoringFinancedEditor)return;lastFinancedRun=null;if($('tables').hasChildNodes()||$('fundingResult').hasChildNodes())$('stale').hidden=false;setFinancedPdfAvailable(false);}
 const FINANCED_INPUTS_KEY='projection105.financed.inputs.v1';
+const FINANCED_MULTIPLAN_KEY='projection105.financed.inputs.v2';
 const financedFieldIds=['scenario','planType','sex','year','regAge','minimumAge','pastRate','futureRate','projectionCurrentRate','projectionNextRate','fundBirth','fundDate','fundSalary','initialBalance','lastPurchase','previousPurchases','externalTable'];
-function saveFinancedInputs(){
- try{
+const financedCommonFieldIds=['sex','regAge','minimumAge','fundBirth','fundDate','lastPurchase'];
+const financedPlanFieldIds=financedFieldIds.filter(id=>!financedCommonFieldIds.includes(id));
+let financedPlans=[],financedExternalEditors=[],activeFinancedPlan=0,restoringFinancedEditor=false,lastFinancedRun=null,defaultFinancedPlan=null;
+function captureFinancedEditor(){
   if(rateSetKey==='Base'){
    baseInterests=[$('pastRate').value,$('futureRate').value];
    baseProjectionInterests=[$('projectionCurrentRate').value,$('projectionNextRate').value];
   }
   savedRateSets.set(rateSetKey,new Map(rates));
-  const fields=Object.fromEntries(financedFieldIds.map(id=>[id,$(id).value]));
+  const fields=Object.fromEntries(financedPlanFieldIds.map(id=>[id,$(id).value]));
   const brackets=[...$('brackets').rows].map(row=>({from:row.querySelector('.from').value,to:row.querySelector('.to').value,rate:row.querySelector('.bonus').value}));
   const rateSets=[...savedRateSets].map(([key,set])=>[key,[...set]]);
-  localStorage.setItem(FINANCED_INPUTS_KEY,JSON.stringify({fields,brackets,rateSets,baseInterests,baseProjectionInterests}));
+  return {fields,brackets,rateSets,baseInterests:[...baseInterests],baseProjectionInterests:[...baseProjectionInterests]};
+}
+function saveFinancedInputs(){
+ if(restoringFinancedEditor)return;
+ try{
+  financedPlans[activeFinancedPlan]=captureFinancedEditor();
+  const common=Object.fromEntries(financedCommonFieldIds.map(id=>[id,$(id).value]));
+  localStorage.setItem(FINANCED_MULTIPLAN_KEY,JSON.stringify({version:2,common,plans:financedPlans,planCount:Number($('financedPlanCount').value),activePlan:activeFinancedPlan}));
   $('externalImportStatus').textContent='';
  }catch(error){$('externalImportStatus').textContent='Les saisies ne peuvent pas être mémorisées dans ce navigateur. Conserve une copie de la tabelle Excel avant de fermer la page.';}
 }
-function restoreFinancedInputs(){
- let saved;
- try{saved=JSON.parse(localStorage.getItem(FINANCED_INPUTS_KEY)||'null');}catch(error){return;}
+function applyFinancedEditor(saved){
  if(!saved||!saved.fields)return;
- financedFieldIds.forEach(id=>{if(typeof saved.fields[id]==='string')$(id).value=saved.fields[id];});
+ financedPlanFieldIds.forEach(id=>{if(typeof saved.fields[id]==='string')$(id).value=saved.fields[id];});
  if(typeof saved.fields.projectionCurrentRate!=='string')$('projectionCurrentRate').value=saved.fields.futureRate||'2.00';
  if(typeof saved.fields.projectionNextRate!=='string')$('projectionNextRate').value=saved.fields.futureRate||'2.00';
  if(Array.isArray(saved.brackets)){
@@ -203,13 +216,87 @@ function restoreFinancedInputs(){
  if(savedRateSets.has(nextKey)){
   rateSetKey=nextKey;
   rates.clear();savedRateSets.get(nextKey).forEach((value,age)=>rates.set(age,value));
- }else rateSetKey='Base';
- loadPlanRates();$('scenario').onchange();$('stale').hidden=true;
+ }else{
+  rateSetKey='Base';
+  const base=savedRateSets.get('Base');
+  if(base){rates.clear();base.forEach((value,age)=>rates.set(age,value));}
+ }
+ loadPlanRates();$('scenario').onchange();
+}
+function renderFinancedPlanTabs(){
+ $('financedPlanTabs').replaceChildren();
+ const count=Number($('financedPlanCount').value);
+ for(let index=0;index<count;index++){
+  const button=document.createElement('button');button.type='button';button.id=`financedPlanTab${index}`;
+  button.textContent=`Plan ${index+1}`;button.setAttribute('role','tab');button.setAttribute('aria-controls','planEditor');
+  button.setAttribute('aria-selected',String(index===activeFinancedPlan));button.tabIndex=index===activeFinancedPlan?0:-1;
+  button.onclick=()=>selectFinancedPlan(index);$('financedPlanTabs').append(button);
+ }
+ $('planEditor').setAttribute('aria-labelledby',`financedPlanTab${activeFinancedPlan}`);
+}
+function selectFinancedPlan(index){
+ if(index===activeFinancedPlan||$('externalUpload').disabled)return;
+ financedExternalEditors[activeFinancedPlan]={workbook:externalWorkbook,fileName:externalFileName,sheet:$('externalSheet').value,status:$('externalFileStatus').textContent};
+ financedPlans[activeFinancedPlan]=captureFinancedEditor();activeFinancedPlan=index;
+ restoringFinancedEditor=true;
+ try{applyFinancedEditor(financedPlans[index]);resetExternalFileEditor();}finally{restoringFinancedEditor=false;}
+ renderFinancedPlanTabs();saveFinancedInputs();
+}
+function resetExternalFileEditor(){
+ const cached=financedExternalEditors[activeFinancedPlan];
+ externalWorkbook=cached?.workbook||null;externalFileName=cached?.fileName||'';
+ $('externalFile').value='';$('externalSheet').replaceChildren();
+ if(externalWorkbook)for(const name of externalWorkbook.SheetNames){const option=document.createElement('option');option.value=name;option.textContent=name;$('externalSheet').append(option);}
+ if(cached?.sheet)$('externalSheet').value=cached.sheet;
+ $('externalSheetField').hidden=!externalWorkbook||externalWorkbook.SheetNames.length<2;
+ $('externalFileStatus').textContent=cached?.status||($('externalTable').value?'Tabelle importée mémorisée pour ce plan.':'');
+}
+function initializeFinancedPlans(){
+ const common=document.createElement('section');common.className='panel';common.innerHTML='<h2>Assuré et dernier rachat global</h2><div class="fields" id="financedCommonFields"><label>Nombre de plans<select id="financedPlanCount"><option>1</option><option>2</option><option>3</option></select></label></div>';
+ const form=$('financedForm');form.prepend(common);
+ for(const id of ['fundBirth','sex','fundDate','regAge','minimumAge','lastPurchase'])$('financedCommonFields').append($(id).closest('label'));
+ $('sexField').hidden=false;
+ $('lastPurchase').closest('label').firstChild.textContent='Montant du dernier rachat global (CHF)';
+ $('fundingInputs').querySelector('h2').textContent='Données du plan';
+ $('fundingInputs').querySelector('.note').textContent='Les rachats antérieurs de ce plan comprennent tous ses rachats futurs effectués avant le dernier rachat global. Salaire et avoir sont renseignés à la date commune, sans revalorisation historique automatique.';
+ const tabs=document.createElement('div');tabs.id='financedPlanTabs';tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Plans de prévoyance');
+ common.after(tabs);
+ const editor=document.createElement('div');editor.id='planEditor';editor.setAttribute('role','tabpanel');tabs.after(editor);
+ while(editor.nextElementSibling&&editor.nextElementSibling!==$('buildTables'))editor.append(editor.nextElementSibling);
+ editor.querySelector('h2').textContent='Paramètres du plan';
+ defaultFinancedPlan=captureFinancedEditor();
+ let saved=null;
+ try{saved=JSON.parse(localStorage.getItem(FINANCED_MULTIPLAN_KEY)||'null');}catch(error){}
+ if(saved?.version===2&&Array.isArray(saved.plans)&&saved.plans.length&&saved.plans.every(plan=>plan?.fields&&Array.isArray(plan.brackets)&&Array.isArray(plan.rateSets))){
+  financedCommonFieldIds.forEach(id=>{if(typeof saved.common?.[id]==='string')$(id).value=saved.common[id];});
+  financedPlans=saved.plans.slice(0,3);
+  const count=[1,2,3].includes(saved.planCount)?saved.planCount:1;
+  $('financedPlanCount').value=String(count);
+  activeFinancedPlan=Number.isInteger(saved.activePlan)&&saved.activePlan>=0&&saved.activePlan<count?saved.activePlan:0;
+ }else{
+  try{saved=JSON.parse(localStorage.getItem(FINANCED_INPUTS_KEY)||'null');}catch(error){saved=null;}
+  if(saved?.fields)financedCommonFieldIds.forEach(id=>{if(typeof saved.fields[id]==='string')$(id).value=saved.fields[id];});
+  financedPlans=[saved?.fields?saved:defaultFinancedPlan];
+ }
+ while(financedPlans.length<3)financedPlans.push(JSON.parse(JSON.stringify(defaultFinancedPlan)));
+ restoringFinancedEditor=true;
+ try{applyFinancedEditor(financedPlans[activeFinancedPlan]);resetExternalFileEditor();}finally{restoringFinancedEditor=false;}
+ renderFinancedPlanTabs();
+ $('financedPlanCount').onchange=()=>{
+  const count=Number($('financedPlanCount').value);
+  if(activeFinancedPlan>=count)selectFinancedPlan(count-1);
+  renderFinancedPlanTabs();markStale();saveFinancedInputs();
+ };
+ tabs.onkeydown=event=>{
+  const count=Number($('financedPlanCount').value);let index=activeFinancedPlan;
+  if(event.key==='ArrowRight')index=(index+1)%count;else if(event.key==='ArrowLeft')index=(index+count-1)%count;else if(event.key==='Home')index=0;else if(event.key==='End')index=count-1;else return;
+  event.preventDefault();selectFinancedPlan(index);$(`financedPlanTab${index}`).focus();
+ };
 }
 $('regAge').addEventListener('input',renderRates);renderRates();
 function setFinancedPdfAvailable(available){$('saveFinancedPdf').hidden=!available;$('saveFinancedPdf').disabled=!available;}
 $('financedForm').addEventListener('input',()=>{markStale();saveFinancedInputs();setFinancedPdfAvailable(false);});$('financedForm').addEventListener('change',()=>{markStale();saveFinancedInputs();setFinancedPdfAvailable(false);});
-$('clearSavedInputs').onclick=()=>{try{localStorage.removeItem(FINANCED_INPUTS_KEY);}catch(error){}location.reload();};
+$('clearSavedInputs').onclick=()=>{try{localStorage.removeItem(FINANCED_INPUTS_KEY);localStorage.removeItem(FINANCED_MULTIPLAN_KEY);}catch(error){}location.reload();};
 $('scenario').onchange=()=>{
  const projection=$('scenario').value==='projection',external=$('scenario').value==='external';
  $('externalInputs').hidden=!external;$('tableInputs').hidden=external;
@@ -218,10 +305,10 @@ $('scenario').onchange=()=>{
  $('initialBalanceField').hidden=!projection;
  $('pastRate').closest('label').hidden=projection||external;$('futureRate').closest('label').hidden=projection||external;
  $('projectionCurrentRateField').hidden=!projection;$('projectionNextRateField').hidden=!projection;$('scenarioNote').hidden=!projection;
- $('fundDateLabel').textContent='Date du dernier rachat';
+ $('fundDateLabel').textContent='Date du dernier rachat global';
  updateProjectionRateLabels();
- $('buildTables').textContent=external?'Calculer avec la tabelle externe':projection?'Projeter l’avoir, puis calculer la date financée':'Construire les tabelles et calculer la date financée';
- $('fundingResult').replaceChildren();$('tables').replaceChildren();$('error').textContent='';$('stale').hidden=true;setFinancedPdfAvailable(false);
+ $('buildTables').textContent='Calculer la date commune';
+ if(!restoringFinancedEditor){lastFinancedRun=null;$('fundingResult').replaceChildren();$('tables').replaceChildren();$('error').textContent='';$('stale').hidden=true;setFinancedPdfAvailable(false);}
 };
 function updateProjectionRateLabels(){
  const match=/^\d{2}\.\d{2}\.(\d{4})$/.exec($('fundDate').value.trim());
@@ -311,12 +398,10 @@ function renderExternal(){
   const value=coefficients.get(`${age}/${target}`);
   return value===undefined?'-':format(value,6);
  })]);
- $('tables').innerHTML=`${result.past.length?`<section class="panel"><details open><summary>Tabelle externe de rachat du passé</summary>${grid(['Âge','Coefficient (%)'],result.past.map(row=>[ageLabel(row.age),format(row.percent,6)]))}</details></section>`:''}<section class="panel"><details open><summary>Tabelle externe de rachat du futur</summary>${grid(['Âge au rachat',...retirementAges.map(age=>`Retraite ${ageLabel(age)} ans (%)`)],futureRows)}</details></section><section class="panel"><details><summary>Coefficients utilisés pour l’interpolation</summary>${grid(['Âge au rachat',...result.targets.map(age=>`Retraite ${ageLabel(age)} ans (%)`)],result.future.map(row=>[row.age,...row.coefficients.map(value=>format(value*100,6))]))}</details><p class="note">Sexe : ${result.sex}. Pour une cible dépassée, reprise du coefficient diagonal de la ligne. Les rachats antérieurs sont déduits à chaque borne avant interpolation mensuelle, avec un minimum de zéro. La tabelle du passé est affichée uniquement à titre de référence.</p></section>`;
+ $('tables').innerHTML=`${result.past.length?`<section class="panel"><details open><summary>Tabelle externe de rachat du passé</summary>${grid(['Âge','Coefficient (%)'],result.past.map(row=>[ageLabel(row.age),format(row.percent,6)]))}</details></section>`:''}<section class="panel"><details open><summary>Tabelle externe de rachat du futur</summary>${grid(['Âge au rachat',...retirementAges.map(age=>`Retraite ${ageLabel(age)} ans (%)`)],futureRows)}</details></section><section class="panel"><details><summary>Coefficients utilisés pour l’interpolation</summary>${grid(['Âge au rachat',...result.targets.map(age=>`Retraite ${ageLabel(age)} ans (%)`)],result.future.map(row=>[row.age,...row.coefficients.map(value=>format(value*100,6))]))}</details><p class="note">Sexe : ${result.sex}. Les coefficients importés sont prioritaires. Pour une cible dépassée, le coefficient diagonal de la ligne est repris uniquement si la cellule manque. Les rachats antérieurs sont déduits à chaque borne avant interpolation mensuelle, avec un minimum de zéro. La tabelle du passé est affichée uniquement à titre de référence.</p></section>`;
  $('tables').hidden=false;$('stale').hidden=true;setFinancedPdfAvailable(true);
 }
-$('financedForm').onsubmit=event=>{
- event.preventDefault();$('error').textContent='';
- try{
+function renderCurrentFinancedPlan(){
  if($('scenario').value==='external'){renderExternal();return;}
  const input={type:$('planType').value,retirementAge:number($('regAge').value),pastInterest:number($('pastRate').value),futureInterest:number($('futureRate').value),currentYearInterest:number($('projectionCurrentRate').value),nextYearInterest:number($('projectionNextRate').value),brackets:[...$('brackets').rows].map(tr=>({from:number(tr.querySelector('.from').value),to:number(tr.querySelector('.to').value),rate:number(tr.querySelector('.bonus').value)})),rates:Object.fromEntries([...rates].map(([a,r])=>[a,number(r)]))};
  if($('scenario').value==='projection'){renderProjection(input);setFinancedPdfAvailable(true);return;}
@@ -331,7 +416,55 @@ $('financedForm').onsubmit=event=>{
  updateFundingPresentation(parseFinancedDate($('fundBirth').value),funding,false);
  $('stale').hidden=true;$('tables').hidden=false;setFinancedPdfAvailable(true);
  $('tables').querySelector('.note').textContent='Tous les coefficients sont exprimés en % du salaire assuré. Exemple : un coefficient de 150 % correspond à 1.5 × le salaire. Le calcul du financement est affiché au-dessus.';
- }catch(error){$('fundingResult').replaceChildren();$('tables').replaceChildren();$('stale').hidden=true;$('error').textContent=error.message;setFinancedPdfAvailable(false);}
+}
+function financedMethodLabel(scenario){return scenario==='external'?'Tabelle de rachat (externe)':scenario==='projection'?'Projection de l’avoir':'Tabelle de rachat FCT';}
+function financedPlanParameters(state){
+ const fields=state.fields;
+ const key=fields.planType==='1e'?`${fields.year}-${$('sex').value}`:'Base';
+ const rateSet=state.rateSets.find(([name])=>name===key)?.[1];
+ const defaults=fields.planType==='1e'?ONE_E_CONVERSION_RATES[fields.year][$('sex').value]:null;
+ const conversionRates=rateSet||Array.from({length:13},(_,index)=>[58+index,defaults?.[index]===undefined?'':String(defaults[index])]);
+ return {scenario:fields.scenario,type:fields.planType,year:fields.year,salary:number(fields.fundSalary),initial:number(fields.initialBalance),previousPurchases:number(fields.previousPurchases),pastInterest:fields.planType==='1e'?0:number(fields.pastRate),futureInterest:fields.planType==='1e'?0:number(fields.futureRate),currentYearInterest:fields.planType==='1e'?0:number(fields.projectionCurrentRate),nextYearInterest:fields.planType==='1e'?0:number(fields.projectionNextRate),externalTable:fields.externalTable||'',brackets:state.brackets.map(row=>({from:Number(row.from),to:Number(row.to),rate:number(String(row.rate))})),rates:Object.fromEntries(conversionRates.map(([age,value])=>[age,number(String(value))]))};
+}
+function renderCombinedFinancing(run){
+ const funding=run.funding,retained=funding.retainedCandidate,date=retirementDateForCandidate(retained);
+ const display=fundingAtFinancedDate(retained,run.common.birth,date,funding.lastPurchase,!funding.lastUnfunded);
+ const contributions=retained.contributions.map((candidate,index)=>[`Plan ${index+1}`,financedMethodLabel(run.plans[index].scenario),format(candidate.maximum,2),format(run.plans[index].parameters.previousPurchases,2),format(candidate.required,2)]);
+ const monthly=funding.candidates.map(candidate=>{
+  const difference=candidate.required-funding.lastPurchase;
+  return [dateLabel(candidate.date),monthsLabel(ageMonthsBeforeDisplayedDate(run.common.birth,candidate.date)),...candidate.contributions.map(item=>format(item.required,2)),format(candidate.required,2),format(funding.lastPurchase,2),format(funding.lastUnfunded?Math.max(0,difference):difference,2),candidate===funding.lastUnfunded?'Dernière date non financée':candidate===retained?'Retraite anticipée préfinancée':candidate.funded?'Financé':'Non financé'];
+ });
+ const count=run.plans.length;
+ const note=funding.restrictedCoverage?`Période commune disponible : du ${dateLabel(funding.candidates[0].date)} au ${dateLabel(funding.candidates.at(-1).date)}. Seules les dates couvertes par tous les plans sont cumulées.`:'Les montants rachetables nets des plans sont additionnés à chaque date. Le dernier rachat global est compté une seule fois.';
+ $('fundingResult').innerHTML=`<section class="panel" id="combinedFundingSummary"><h2>${funding.lastUnfunded?'Dernière date de retraite non entièrement financée':'Retraite anticipée entièrement préfinancée'} · ${count} plan${count>1?'s':''}</h2>${renderFundingSummary(retained,display,funding,date)}<p class="note">${note} Les rachats plus anciens sont déduits dans leur plan respectif. L’âge affiché est calculé au jour précédent la date retenue.</p><details open><summary>Contributions à la date commune</summary>${grid(['Plan','Méthode','Maximum brut (CHF)','Rachats antérieurs (CHF)','Montant rachetable net (CHF)'],contributions)}</details><details><summary>Détail du financement mensuel commun</summary>${grid(['Date de retraite','Âge au jour précédent',...run.plans.map((plan,index)=>`Plan ${index+1} net (CHF)`),'Total rachetable net (CHF)','Dernier rachat global (CHF)','Solde restant (CHF)','État'],monthly)}</details></section>`;
+ $('tables').innerHTML=run.plans.map((plan,index)=>`<h2>Plan ${index+1} · ${financedMethodLabel(plan.scenario)}</h2>${plan.annexHtml}`).join('');
+ $('tables').hidden=false;$('stale').hidden=true;
+}
+$('financedForm').onsubmit=event=>{
+ event.preventDefault();$('error').textContent='';lastFinancedRun=null;
+ const selectedPlan=activeFinancedPlan;
+ financedPlans[selectedPlan]=captureFinancedEditor();
+ const selectedState=financedPlans[selectedPlan];
+ try{
+  const common={birth:parseFinancedDate($('fundBirth').value),purchaseDate:parseFinancedDate($('fundDate').value),retirementAge:number($('regAge').value),minimumAge:number($('minimumAge').value),sex:$('sex').value,lastPurchase:number($('lastPurchase').value)};
+  const states=financedPlans.slice(0,Number($('financedPlanCount').value));
+  const plans=states.map((state,index)=>{
+   try{const parameters=financedPlanParameters(state);return {...calculateFinancedPlan(common,parameters),parameters,input:state};}
+   catch(error){throw Error(`Plan ${index+1} : ${error.message}`);}
+  });
+  const funding=combineFinancedPlans(plans,common.lastPurchase);
+  restoringFinancedEditor=true;
+  try{
+   for(let index=0;index<plans.length;index++){
+    applyFinancedEditor(states[index]);renderCurrentFinancedPlan();
+    $('fundingResult').querySelector(':scope > .panel:last-child')?.remove();
+    const annex=document.createElement('div');annex.innerHTML=$('fundingResult').innerHTML+$('tables').innerHTML;
+    for(const title of annex.querySelectorAll('h2,details > summary'))title.textContent=`Plan ${index+1} · ${title.textContent}`;
+    plans[index].annexHtml=annex.innerHTML;
+   }
+  }finally{applyFinancedEditor(selectedState);restoringFinancedEditor=false;}
+  const run={common,plans,funding};renderCombinedFinancing(run);lastFinancedRun=run;setFinancedPdfAvailable(true);
+ }catch(error){restoringFinancedEditor=false;$('fundingResult').replaceChildren();$('tables').replaceChildren();$('stale').hidden=true;$('error').textContent=error.message;setFinancedPdfAvailable(false);}
 };
-restoreFinancedInputs();updateProjectionRateLabels();
+initializeFinancedPlans();updateProjectionRateLabels();
 </script><script src="financed-pdf-export.js?v=2"></script></body></html>
